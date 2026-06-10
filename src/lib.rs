@@ -150,8 +150,91 @@ fn expect<'lex>(lex: RefLexer, expect: TokenKind) -> Parser<(), Box<dyn StdError
 
 #[cfg(test)]
 mod tests {
-    // use super::*;
+    use super::*;
+    use lex_just_parse::lexer::Lexer;
+
+    fn parse_str(source: &str) -> Result<Gss, Box<dyn std::error::Error>> {
+        let mut lex = Lexer::new(source);
+        parse("test_string", &mut lex)
+    }
 
     #[test]
-    fn test_parse() {}
+    fn test_parse_success() {
+        let source = r#"
+            name = "GSS",
+            version = 1,
+            active = true,
+            settings = {
+                theme = "dark",
+                debug = false,
+            },
+        "#;
+        let gss = parse_str(source).expect("Should parse successfully");
+
+        // Test basic values
+        assert_eq!(gss.get::<String>(&["name"]), Some(&"GSS".to_string()));
+        assert_eq!(gss.get::<i32>(&["version"]), Some(&1));
+        assert_eq!(gss.get::<bool>(&["active"]), Some(&true));
+
+        // Test nested values
+        assert_eq!(gss.get::<String>(&["settings", "theme"]), Some(&"dark".to_string()));
+        assert_eq!(gss.get::<bool>(&["settings", "debug"]), Some(&false));
+
+        // Test non-existent keys / incorrect types
+        assert_eq!(gss.get::<String>(&["non_existent"]), None);
+        assert_eq!(gss.get::<String>(&["settings", "non_existent"]), None);
+        assert_eq!(gss.get::<i32>(&["active"]), None); // Type mismatch
+    }
+
+    #[test]
+    fn test_parse_redefinition() {
+        let source = r#"
+            key = 1,
+            key = 2,
+        "#;
+        let result = parse_str(source);
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("Redefinition of key key"));
+    }
+
+    #[test]
+    fn test_parse_missing_comma() {
+        let source = r#"
+            key = 1
+            other = 2,
+        "#;
+        let result = parse_str(source);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_missing_eq() {
+        let source = r#"
+            key 1,
+        "#;
+        let result = parse_str(source);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_empty_path() {
+        let gss = parse_str("a = 1,").expect("Should parse");
+        assert_eq!(gss.get::<i32>(&[]), None);
+    }
+
+    #[test]
+    fn test_dump() {
+        let source = r#"
+            name = "GSS",
+            version = 1,
+            active = true,
+            settings = {
+                theme = "dark",
+            },
+        "#;
+        let gss = parse_str(source).expect("Should parse");
+        // Ensure dump runs without panicking
+        gss.dump(0);
+    }
 }
