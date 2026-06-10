@@ -1,5 +1,6 @@
 style = {
-    top = 69,
+    top = 89%,
+    count = 69,
     frame = true,
     inner = {
         link = "google.com",

@@ -9,6 +9,7 @@ use lex_just_parse::parser::{Parser, RefLexer};
 use lex_just_parse::try_parse;
 
 pub type Value = Box<dyn Any + 'static>;
+pub type Percent = f32;
 pub type Gss = Object;
 
 #[derive(Debug)]
@@ -44,6 +45,8 @@ impl Object {
             if let Some(string) = v.downcast_ref::<String>() {
                 println!("\"{}\"", string);
             } else if let Some(i) = v.downcast_ref::<i32>() {
+                println!("{}", i);
+            } else if let Some(i) = v.downcast_ref::<f32>() {
                 println!("{}", i);
             } else if let Some(b) = v.downcast_ref::<bool>() {
                 println!("{}", b);
@@ -184,6 +187,10 @@ fn parse_value<'lex>(mut lex: RefLexer) -> Parser<Value, Box<dyn StdError>> {
                 Ok(x) => x,
                 Err(err) => return Parser::Fail(lex, err.into()),
             };
+            if lex.peek().kind == TokenKind::Mod {
+                lex.next();
+                return Parser::Success(lex, Box::new(x as f32 / 100.));
+            }
             Parser::Success(lex, Box::new(x))
         }
         TokenKind::Identifier if t.source() == "true" => Parser::Success(lex, Box::new(true)),
@@ -365,7 +372,8 @@ mod tests {
     #[test]
     fn test_load_files() {
         let gss1 = load_gss_from_file("test/test.gss").expect("Should load test.gss");
-        assert_eq!(gss1.get::<i32>(&["style", "top"]), Some(&69));
+        assert_eq!(gss1.get::<Percent>(&["style", "top"]), Some(&0.89));
+        assert_eq!(gss1.get::<i32>(&["style", "count"]), Some(&69));
         assert_eq!(
             gss1.get::<String>(&["style", "inner", "link"]),
             Some(&"google.com".to_string())
@@ -404,5 +412,14 @@ mod tests {
         "#;
         let gss = parse_str(source_path).expect("Should parse");
         assert_eq!(gss.get::<i32>(&["a"]), None);
+    }
+
+    #[test]
+    fn test_percent() {
+        let source_path = r#"
+            a = 89%,
+        "#;
+        let gss = parse_str(source_path).expect("Should parse");
+        assert_eq!(gss.get::<Percent>(&["a"]), Some(&0.89));
     }
 }
