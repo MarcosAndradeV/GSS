@@ -1,0 +1,12 @@
+[package]
+name = "gss"
+version = "0.1.0"
+edition = "2024"
+default-run = "gss_test"
+
+[dependencies]
+lex-just-parse = "0.1.1"
+
+[[bin]]
+name = "gss_test"
+path = "src/bin/main.rs"

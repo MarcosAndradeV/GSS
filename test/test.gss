@@ -1,0 +1,7 @@
+style = {
+    top = 69,
+    frame = true,
+    inner = {
+        link = "google.com",
+    },
+},
