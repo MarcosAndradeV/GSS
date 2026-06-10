@@ -12,7 +12,10 @@ pub type Value = Box<dyn Any + 'static>;
 pub type Gss = Object;
 
 #[derive(Debug)]
-pub struct Object(pub HashMap<String, Value>);
+pub struct Object {
+    inner: HashMap<String, Value>,
+    max_depth: usize,
+}
 
 #[derive(Debug)]
 pub enum Expr {
@@ -22,13 +25,16 @@ pub enum Expr {
 
 impl Object {
     pub fn new() -> Self {
-        Self(HashMap::new())
+        Self {
+            inner: HashMap::new(),
+            max_depth: 20,
+        }
     }
 
     pub fn dump(&self, level: usize) {
         println!("{{");
 
-        for (k, v) in self.0.iter() {
+        for (k, v) in self.inner.iter() {
             for _ in 0..=level {
                 print!("    ");
             }
@@ -36,7 +42,7 @@ impl Object {
             print!("{k} => ");
 
             if let Some(string) = v.downcast_ref::<String>() {
-                println!("{}", string);
+                println!("\"{}\"", string);
             } else if let Some(i) = v.downcast_ref::<i32>() {
                 println!("{}", i);
             } else if let Some(b) = v.downcast_ref::<bool>() {
@@ -57,7 +63,7 @@ impl Object {
                     }
                 }
             } else {
-                println!("UNKNOW({:?})", v.type_id());
+                println!("UNKNOWN({:?})", v.type_id());
             }
         }
 
@@ -69,30 +75,53 @@ impl Object {
     }
 
     pub fn get<T: 'static>(&self, path: &[&str]) -> Option<&T> {
-        let mut obj = self;
-        for c in path.iter().rev().skip(1).rev() {
-            let v = obj.0.get(*c)?;
-            if let Some(o) = v.downcast_ref::<Object>() {
-                obj = o;
-            } else {
-                return None;
-            }
+        self.get_impl(path, 0, self.max_depth)
+    }
+
+    fn get_impl<T: 'static>(
+        &self,
+        path: &[&str],
+        current_depth: usize,
+        max_depth: usize,
+    ) -> Option<&T> {
+        if current_depth >= max_depth {
+            return None;
         }
-        if let Some(last) = path.last() {
-            if let Some(v) = obj.0.get(*last) {
+        let mut obj = self;
+        if let Some((last, prefix)) = path.split_last() {
+            for c in prefix {
+                if let Some(v) = obj.inner.get(*c) {
+                    if let Some(o) = v.downcast_ref::<Object>() {
+                        obj = o;
+                    } else {
+                        return None;
+                    }
+                } else {
+                    return None;
+                }
+            }
+
+            if let Some(v) = obj.inner.get(*last) {
                 if let Some(expr) = v.downcast_ref::<Expr>() {
-                    match expr {
-                        Expr::Symbol(s) => return self.get(&[s.as_str()]),
+                    return match expr {
+                        Expr::Symbol(s) => {
+                            self.get_impl(&[s.as_str()], current_depth + 1, max_depth)
+                        }
                         Expr::Access(seq) => {
                             let tmp: Vec<&str> = seq.iter().map(AsRef::as_ref).collect();
-                            return self.get(&tmp);
+                            self.get_impl(&tmp, current_depth + 1, max_depth)
                         }
-                    }
+                    };
                 }
                 return v.downcast_ref::<T>();
             }
         }
         None
+    }
+
+    /// Default = 20
+    pub fn set_max_depth(&mut self, max_depth: usize) {
+        self.max_depth = max_depth;
     }
 }
 
@@ -125,8 +154,7 @@ fn parse_object<'lex>(mut lex: RefLexer) -> Parser<Gss, Box<dyn StdError>> {
     let mut object = Object::new();
     loop {
         let t = lex.peek();
-        if t.kind == TokenKind::EOF {
-            lex.next();
+        if t.kind == TokenKind::CloseCurly || t.kind == TokenKind::EOF {
             break;
         }
         let (l, ()) = try_parse!(expect(lex, TokenKind::Identifier));
@@ -136,7 +164,7 @@ fn parse_object<'lex>(mut lex: RefLexer) -> Parser<Gss, Box<dyn StdError>> {
         let (l, value) = try_parse!(parse_value(l));
         let (l, _) = try_parse!(expect(l, TokenKind::Comma));
         l.next();
-        if object.0.insert(key.clone(), value).is_some() {
+        if object.inner.insert(key.clone(), value).is_some() {
             return Parser::Fail(l, format!("Redefinition of key {key}").into());
         }
         lex = l;
@@ -338,11 +366,43 @@ mod tests {
     fn test_load_files() {
         let gss1 = load_gss_from_file("test/test.gss").expect("Should load test.gss");
         assert_eq!(gss1.get::<i32>(&["style", "top"]), Some(&69));
-        assert_eq!(gss1.get::<String>(&["style", "inner", "link"]), Some(&"google.com".to_string()));
+        assert_eq!(
+            gss1.get::<String>(&["style", "inner", "link"]),
+            Some(&"google.com".to_string())
+        );
 
         let gss2 = load_gss_from_file("test/test2.gss").expect("Should load test2.gss");
         assert_eq!(gss2.get::<i32>(&["style", "image1", "top"]), Some(&50));
         assert_eq!(gss2.get::<i32>(&["style", "image2", "top"]), Some(&50));
         assert_eq!(gss2.get::<i32>(&["style", "image2", "left"]), Some(&50));
+    }
+
+    #[test]
+    fn test_cycle_detection() {
+        // Direct cycle: a = a,
+        let source_direct = r#"
+            a = a,
+        "#;
+        let gss = parse_str(source_direct).expect("Should parse");
+        assert_eq!(gss.get::<i32>(&["a"]), None);
+
+        // Indirect cycle: a = b, b = a,
+        let source_indirect = r#"
+            a = b,
+            b = a,
+        "#;
+        let gss = parse_str(source_indirect).expect("Should parse");
+        assert_eq!(gss.get::<i32>(&["a"]), None);
+        assert_eq!(gss.get::<i32>(&["b"]), None);
+
+        // Path cycle: a = b.x, b = { x = a },
+        let source_path = r#"
+            a = b.x,
+            b = {
+                x = a,
+            },
+        "#;
+        let gss = parse_str(source_path).expect("Should parse");
+        assert_eq!(gss.get::<i32>(&["a"]), None);
     }
 }
