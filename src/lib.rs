@@ -10,8 +10,15 @@ use lex_just_parse::try_parse;
 
 pub type Value = Box<dyn Any + 'static>;
 pub type Gss = Object;
+
 #[derive(Debug)]
 pub struct Object(pub HashMap<String, Value>);
+
+#[derive(Debug)]
+pub enum Expr {
+    Symbol(String),
+    Access(Vec<String>),
+}
 
 impl Object {
     pub fn new() -> Self {
@@ -36,6 +43,21 @@ impl Object {
                 println!("{}", b);
             } else if let Some(obj) = v.downcast_ref::<Object>() {
                 obj.dump(level + 1);
+            } else if let Some(expr) = v.downcast_ref::<Expr>() {
+                match expr {
+                    Expr::Symbol(s) => println!("{s}"),
+                    Expr::Access(seq) => {
+                        for (i, s) in seq.iter().enumerate() {
+                            if i > 0 {
+                                print!(".");
+                            }
+                            print!("{s}");
+                        }
+                        println!()
+                    }
+                }
+            } else {
+                println!("UNKNOW({:?})", v.type_id());
             }
         }
 
@@ -58,6 +80,15 @@ impl Object {
         }
         if let Some(last) = path.last() {
             if let Some(v) = obj.0.get(*last) {
+                if let Some(expr) = v.downcast_ref::<Expr>() {
+                    match expr {
+                        Expr::Symbol(s) => return self.get(&[s.as_str()]),
+                        Expr::Access(seq) => {
+                            let tmp: Vec<&str> = seq.iter().map(AsRef::as_ref).collect();
+                            return self.get(&tmp);
+                        }
+                    }
+                }
                 return v.downcast_ref::<T>();
             }
         }
@@ -117,7 +148,7 @@ fn parse_object<'lex>(mut lex: RefLexer) -> Parser<Gss, Box<dyn StdError>> {
     Parser::Success(lex, object)
 }
 
-fn parse_value<'lex>(lex: RefLexer) -> Parser<Value, Box<dyn StdError>> {
+fn parse_value<'lex>(mut lex: RefLexer) -> Parser<Value, Box<dyn StdError>> {
     let t = lex.next();
     match t.kind {
         TokenKind::Int(base) => {
@@ -136,7 +167,23 @@ fn parse_value<'lex>(lex: RefLexer) -> Parser<Value, Box<dyn StdError>> {
             lex.next();
             Parser::Success(lex, Box::new(object))
         }
-        _ => todo!(),
+        TokenKind::Identifier => {
+            if lex.peek().kind == TokenKind::Dot {
+                let mut seq = vec![t.source];
+                while lex.peek().kind == TokenKind::Dot {
+                    lex.next();
+                    let (l, _) = try_parse!(expect(lex, TokenKind::Identifier));
+                    let t = l.next();
+                    lex = l;
+                    seq.push(t.source);
+                }
+                return Parser::Success(lex, Box::new(Expr::Access(seq)));
+            }
+            Parser::Success(lex, Box::new(Expr::Symbol(t.source)))
+        }
+        _ => {
+            return Parser::Fail(lex, format!("Unexpect token `{t}`").into());
+        }
     }
 }
 
@@ -177,7 +224,10 @@ mod tests {
         assert_eq!(gss.get::<bool>(&["active"]), Some(&true));
 
         // Test nested values
-        assert_eq!(gss.get::<String>(&["settings", "theme"]), Some(&"dark".to_string()));
+        assert_eq!(
+            gss.get::<String>(&["settings", "theme"]),
+            Some(&"dark".to_string())
+        );
         assert_eq!(gss.get::<bool>(&["settings", "debug"]), Some(&false));
 
         // Test non-existent keys / incorrect types
@@ -236,5 +286,63 @@ mod tests {
         let gss = parse_str(source).expect("Should parse");
         // Ensure dump runs without panicking
         gss.dump(0);
+    }
+
+    #[test]
+    fn test_references() {
+        let source = r#"
+            root_val = 42,
+            ref_symbol = root_val,
+            nested = {
+                value = 100,
+                ref_symbol_nested = root_val,
+            },
+            ref_access = nested.value,
+            other = {
+                ref_access_nested = nested.value,
+            },
+            chained1 = root_val,
+            chained2 = chained1,
+            non_existent_ref = does_not_exist,
+            nested_non_existent_ref = nested.does_not_exist,
+        "#;
+        let gss = parse_str(source).expect("Should parse references successfully");
+
+        // Test Expr::Symbol at root level
+        assert_eq!(gss.get::<i32>(&["ref_symbol"]), Some(&42));
+
+        // Test Expr::Symbol inside nested object
+        assert_eq!(gss.get::<i32>(&["nested", "ref_symbol_nested"]), Some(&42));
+
+        // Test Expr::Access at root level
+        assert_eq!(gss.get::<i32>(&["ref_access"]), Some(&100));
+
+        // Test Expr::Access inside nested object
+        assert_eq!(gss.get::<i32>(&["other", "ref_access_nested"]), Some(&100));
+
+        // Test chained references
+        assert_eq!(gss.get::<i32>(&["chained2"]), Some(&42));
+
+        // Test invalid reference (non-existent key)
+        assert_eq!(gss.get::<i32>(&["non_existent_ref"]), None);
+        assert_eq!(gss.get::<i32>(&["nested_non_existent_ref"]), None);
+
+        // Test type mismatch
+        assert_eq!(gss.get::<String>(&["ref_symbol"]), None);
+
+        // Test dump with references
+        gss.dump(0);
+    }
+
+    #[test]
+    fn test_load_files() {
+        let gss1 = load_gss_from_file("test/test.gss").expect("Should load test.gss");
+        assert_eq!(gss1.get::<i32>(&["style", "top"]), Some(&69));
+        assert_eq!(gss1.get::<String>(&["style", "inner", "link"]), Some(&"google.com".to_string()));
+
+        let gss2 = load_gss_from_file("test/test2.gss").expect("Should load test2.gss");
+        assert_eq!(gss2.get::<i32>(&["style", "image1", "top"]), Some(&50));
+        assert_eq!(gss2.get::<i32>(&["style", "image2", "top"]), Some(&50));
+        assert_eq!(gss2.get::<i32>(&["style", "image2", "left"]), Some(&50));
     }
 }
