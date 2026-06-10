@@ -18,9 +18,6 @@ impl Object {
         Self(HashMap::new())
     }
 
-    pub fn get(_path: &[&str]) -> Option<Value> {
-        todo!()
-    }
     pub fn dump(&self, level: usize) {
         println!("{{");
 
@@ -47,6 +44,24 @@ impl Object {
         }
 
         println!("}}");
+    }
+
+    pub fn get<T: 'static>(&self, path: &[&str]) -> Option<&T> {
+        let mut obj = self;
+        for c in path.iter().rev().skip(1).rev() {
+            let v = obj.0.get(*c)?;
+            if let Some(o) = v.downcast_ref::<Object>() {
+                obj = o;
+            } else {
+                return None;
+            }
+        }
+        if let Some(last) = path.last() {
+            if let Some(v) = obj.0.get(*last) {
+                return v.downcast_ref::<T>();
+            }
+        }
+        None
     }
 }
 
@@ -114,7 +129,7 @@ fn parse_value<'lex>(lex: RefLexer) -> Parser<Value, Box<dyn StdError>> {
         }
         TokenKind::Identifier if t.source() == "true" => Parser::Success(lex, Box::new(true)),
         TokenKind::Identifier if t.source() == "false" => Parser::Success(lex, Box::new(false)),
-        TokenKind::StringLiteral => Parser::Success(lex, Box::new(t.source.clone())),
+        TokenKind::StringLiteral => Parser::Success(lex, Box::new(t.unescape())),
         TokenKind::OpenCurly => {
             let (lex, object) = try_parse!(parse_object(lex));
             let (lex, _) = try_parse!(expect(lex, TokenKind::CloseCurly));
