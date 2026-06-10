@@ -182,8 +182,19 @@ fn parse_object<'lex>(mut lex: RefLexer) -> Parser<Gss, Box<dyn StdError>> {
 fn parse_value<'lex>(mut lex: RefLexer) -> Parser<Value, Box<dyn StdError>> {
     let t = lex.next();
     match t.kind {
-        TokenKind::Int(base) => {
+        TokenKind::Number(base) => {
             let x = match i32::from_str_radix(t.source(), base.radix()) {
+                Ok(x) => x,
+                Err(err) => return Parser::Fail(lex, err.into()),
+            };
+            if lex.peek().kind == TokenKind::Mod {
+                lex.next();
+                return Parser::Success(lex, Box::new(x as f32 / 100.));
+            }
+            Parser::Success(lex, Box::new(x))
+        }
+        TokenKind::RealNumber => {
+            let x = match t.source().parse::<f32>() {
                 Ok(x) => x,
                 Err(err) => return Parser::Fail(lex, err.into()),
             };
@@ -421,5 +432,14 @@ mod tests {
         "#;
         let gss = parse_str(source_path).expect("Should parse");
         assert_eq!(gss.get::<Percent>(&["a"]), Some(&0.89));
+    }
+
+    #[test]
+    fn test_float() {
+        let source_path = r#"
+            a = 0.123,
+        "#;
+        let gss = parse_str(source_path).expect("Should parse");
+        assert_eq!(gss.get::<f32>(&["a"]), Some(&0.123));
     }
 }

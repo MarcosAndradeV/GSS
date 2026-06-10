@@ -1,6 +1,7 @@
 style = {
     top = 89%,
     count = 69,
+    price = 42.12,
     frame = true,
     inner = {
         link = "google.com",
