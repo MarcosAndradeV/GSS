@@ -22,6 +22,7 @@ pub struct Object {
 pub enum Expr {
     Symbol(String),
     Access(Vec<String>),
+    RelAccess(Vec<String>),
 }
 
 impl Object {
@@ -64,6 +65,16 @@ impl Object {
                         }
                         println!()
                     }
+                    Expr::RelAccess(seq) => {
+                        print!(".");
+                        for (i, s) in seq.iter().enumerate() {
+                            if i > 0 {
+                                print!(".");
+                            }
+                            print!("{s}");
+                        }
+                        println!()
+                    }
                 }
             } else {
                 println!("UNKNOWN({:?})", v.type_id());
@@ -77,8 +88,20 @@ impl Object {
         println!("}}");
     }
 
+    pub fn get_fields(&self) -> std::collections::hash_map::Keys<'_, String, Value> {
+        self.inner.keys()
+    }
+
     pub fn get<T: 'static>(&self, path: &[&str]) -> Option<&T> {
         self.get_impl(path, 0, self.max_depth)
+    }
+
+    pub fn get_or_default<T: Clone + 'static + Default>(&self, path: &[&str]) -> T {
+        self.get_impl(path, 0, self.max_depth).cloned().unwrap_or_default()
+    }
+
+    pub fn get_or<T: Clone + 'static>(&self, path: &[&str], default: T) -> T {
+        self.get_impl(path, 0, self.max_depth).cloned().unwrap_or(default)
     }
 
     fn get_impl<T: 'static>(
@@ -113,6 +136,10 @@ impl Object {
                         Expr::Access(seq) => {
                             let tmp: Vec<&str> = seq.iter().map(AsRef::as_ref).collect();
                             self.get_impl(&tmp, current_depth + 1, max_depth)
+                        }
+                        Expr::RelAccess(seq) => {
+                            let tmp: Vec<&str> = seq.iter().map(AsRef::as_ref).collect();
+                            obj.get_impl(&tmp, current_depth + 1, max_depth)
                         }
                     };
                 }
@@ -226,6 +253,21 @@ fn parse_value<'lex>(mut lex: RefLexer) -> Parser<Value, Box<dyn StdError>> {
                 return Parser::Success(lex, Box::new(Expr::Access(seq)));
             }
             Parser::Success(lex, Box::new(Expr::Symbol(t.source)))
+        }
+        TokenKind::Dot => {
+            if lex.peek().kind == TokenKind::Identifier {
+                let t = lex.next();
+                let mut seq = vec![t.source];
+                while lex.peek().kind == TokenKind::Dot {
+                    lex.next();
+                    let (l, _) = try_parse!(expect(lex, TokenKind::Identifier));
+                    let t = l.next();
+                    lex = l;
+                    seq.push(t.source);
+                }
+                return Parser::Success(lex, Box::new(Expr::RelAccess(seq)));
+            }
+            return Parser::Fail(lex, format!("Unexpect token `{t}`").into());
         }
         _ => {
             return Parser::Fail(lex, format!("Unexpect token `{t}`").into());
@@ -441,5 +483,28 @@ mod tests {
         "#;
         let gss = parse_str(source_path).expect("Should parse");
         assert_eq!(gss.get::<f32>(&["a"]), Some(&0.123));
+    }
+
+    #[test]
+    fn test_get_fields() {
+        let source_path = r#"
+            a = 0.123,
+            b = true,
+            c = "test",
+        "#;
+        let gss = parse_str(source_path).expect("Should parse");
+        for field in gss.get_fields() {
+            assert!(["a", "b", "c"].contains(&field.as_str()))
+        };
+    }
+
+    #[test]
+    fn test_get_or_default() {
+        let source_path = r#"
+
+        "#;
+        let gss = parse_str(source_path).expect("Should parse");
+        assert_eq!(gss.get_or_default::<f32>(&["a"]), 0.0);
+        assert_eq!(gss.get_or::<f32>(&["b"], 23.0), 23.0);
     }
 }
