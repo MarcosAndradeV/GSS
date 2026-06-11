@@ -194,7 +194,7 @@ fn parse_object<'lex>(mut lex: RefLexer) -> Parser<Gss, Box<dyn StdError>> {
         let (l, value) = try_parse!(parse_value(l));
         let (l, _) = try_parse!(expect(l, TokenKind::Comma));
         l.next();
-        if object.inner.insert(key.clone(), value).is_some() {
+        if object.inner.insert(key.to_string(), value).is_some() {
             return Parser::Fail(l, format!("Redefinition of key {key}").into());
         }
         lex = l;
@@ -242,28 +242,28 @@ fn parse_value<'lex>(mut lex: RefLexer) -> Parser<Value, Box<dyn StdError>> {
         }
         TokenKind::Identifier => {
             if lex.peek().kind == TokenKind::Dot {
-                let mut seq = vec![t.source];
+                let mut seq = vec![t.source.to_string()];
                 while lex.peek().kind == TokenKind::Dot {
                     lex.next();
                     let (l, _) = try_parse!(expect(lex, TokenKind::Identifier));
                     let t = l.next();
                     lex = l;
-                    seq.push(t.source);
+                    seq.push(t.source.to_string());
                 }
                 return Parser::Success(lex, Box::new(Expr::Access(seq)));
             }
-            Parser::Success(lex, Box::new(Expr::Symbol(t.source)))
+            Parser::Success(lex, Box::new(Expr::Symbol(t.source.to_string())))
         }
         TokenKind::Dot => {
             if lex.peek().kind == TokenKind::Identifier {
                 let t = lex.next();
-                let mut seq = vec![t.source];
+                let mut seq = vec![t.source.to_string()];
                 while lex.peek().kind == TokenKind::Dot {
                     lex.next();
                     let (l, _) = try_parse!(expect(lex, TokenKind::Identifier));
                     let t = l.next();
                     lex = l;
-                    seq.push(t.source);
+                    seq.push(t.source.to_string());
                 }
                 return Parser::Success(lex, Box::new(Expr::RelAccess(seq)));
             }
