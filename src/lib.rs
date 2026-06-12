@@ -4,8 +4,8 @@ use std::error::Error as StdError;
 use std::fs;
 use std::path::Path;
 
-use lex_just_parse::lexer::{Lexer, TokenKind};
-use lex_just_parse::parser::{Parser, RefLexer};
+use lex_just_parse::lexer::*;
+use lex_just_parse::parser::{Parser, RefLexer, many1, sep_by};
 use lex_just_parse::try_parse;
 
 pub type Value = Box<dyn Any + 'static>;
@@ -97,11 +97,15 @@ impl Object {
     }
 
     pub fn get_or_default<T: Clone + 'static + Default>(&self, path: &[&str]) -> T {
-        self.get_impl(path, 0, self.max_depth).cloned().unwrap_or_default()
+        self.get_impl(path, 0, self.max_depth)
+            .cloned()
+            .unwrap_or_default()
     }
 
     pub fn get_or<T: Clone + 'static>(&self, path: &[&str], default: T) -> T {
-        self.get_impl(path, 0, self.max_depth).cloned().unwrap_or(default)
+        self.get_impl(path, 0, self.max_depth)
+            .cloned()
+            .unwrap_or(default)
     }
 
     fn get_impl<T: 'static>(
@@ -168,7 +172,7 @@ fn parse<'lex, P: AsRef<Path>>(
     file_path: P,
     lex: RefLexer<'lex>,
 ) -> Result<Gss, Box<dyn StdError>> {
-    match parse_object(lex) {
+    match parse_gss(lex) {
         Parser::Success(_, object) => Ok(object),
         Parser::Fail(lex, err) => Err(format!(
             "{}:{}: {}",
@@ -180,27 +184,55 @@ fn parse<'lex, P: AsRef<Path>>(
     }
 }
 
-fn parse_object<'lex>(mut lex: RefLexer) -> Parser<Gss, Box<dyn StdError>> {
+fn parse_gss<'lex>(mut lex: RefLexer) -> Parser<Gss, Box<dyn StdError>> {
     let mut object = Object::new();
-    loop {
-        let t = lex.peek();
-        if t.kind == TokenKind::CloseCurly || t.kind == TokenKind::EOF {
-            break;
-        }
-        let (l, ()) = try_parse!(expect(lex, TokenKind::Identifier));
-        let key = l.next().source;
-        let (l, _) = try_parse!(expect(l, TokenKind::Eq));
-        l.next();
-        let (l, value) = try_parse!(parse_value(l));
-        let (l, _) = try_parse!(expect(l, TokenKind::Comma));
-        l.next();
+    if lex.peek().kind == TokenKind::EOF {
+        return Parser::Success(lex, object);
+    }
+    let fields = try_parse!(
+        lex,
+        many1(lex, |mut lex| {
+            let k = try_parse!(lex, parse_ident(lex));
+            try_parse!(lex, parse_eq(lex));
+            let v = try_parse!(lex, parse_value(lex));
+            if lex.peek().kind == TokenKind::Comma {
+                lex.next();
+            }
+            Parser::Success(lex, (k, v))
+        })
+    );
+    try_parse!(lex, parse_eof(lex));
+    for (key, value) in fields {
         if object.inner.insert(key.to_string(), value).is_some() {
-            return Parser::Fail(l, format!("Redefinition of key {key}").into());
+            return Parser::Fail(lex, format!("Redefinition of key {key}").into());
         }
-        lex = l;
-        let t = lex.peek();
-        if t.kind == TokenKind::CloseCurly {
-            break;
+    }
+    Parser::Success(lex, object)
+}
+
+fn parse_object<'lex>(mut lex: RefLexer) -> Parser<Object, Box<dyn StdError>> {
+    let mut object = Object::new();
+    if lex.peek().kind == TokenKind::CloseCurly {
+        lex.next();
+        return Parser::Success(lex, object);
+    }
+    let fields = try_parse!(
+        lex,
+        sep_by(
+            lex,
+            |mut lex| {
+                let k = try_parse!(lex, parse_ident(lex));
+                try_parse!(lex, parse_eq(lex));
+                let v = try_parse!(lex, parse_value(lex));
+                Parser::Success(lex, (k, v))
+            },
+            parse_comma
+        )
+    );
+    try_parse!(lex, parse_close_curly(lex));
+    for (key, value) in fields {
+        if object.inner.insert(key.to_string(), value).is_some() {
+            return Parser::Fail(lex, format!("Redefinition of key {key}").into());
         }
     }
     Parser::Success(lex, object)
@@ -235,21 +267,18 @@ fn parse_value<'lex>(mut lex: RefLexer) -> Parser<Value, Box<dyn StdError>> {
         TokenKind::Identifier if t.source() == "false" => Parser::Success(lex, Box::new(false)),
         TokenKind::StringLiteral => Parser::Success(lex, Box::new(t.unescape())),
         TokenKind::OpenCurly => {
-            let (lex, object) = try_parse!(parse_object(lex));
-            let (lex, _) = try_parse!(expect(lex, TokenKind::CloseCurly));
-            lex.next();
+            let object = try_parse!(lex, parse_object(lex));
             Parser::Success(lex, Box::new(object))
         }
         TokenKind::Identifier => {
             if lex.peek().kind == TokenKind::Dot {
+                lex.next();
                 let mut seq = vec![t.source.to_string()];
-                while lex.peek().kind == TokenKind::Dot {
-                    lex.next();
-                    let (l, _) = try_parse!(expect(lex, TokenKind::Identifier));
-                    let t = l.next();
-                    lex = l;
-                    seq.push(t.source.to_string());
-                }
+                seq.extend(
+                    try_parse!(lex, sep_by(lex, parse_ident, parse_dot))
+                        .into_iter()
+                        .map(|t| t.source.to_string()),
+                );
                 return Parser::Success(lex, Box::new(Expr::Access(seq)));
             }
             Parser::Success(lex, Box::new(Expr::Symbol(t.source.to_string())))
@@ -258,30 +287,48 @@ fn parse_value<'lex>(mut lex: RefLexer) -> Parser<Value, Box<dyn StdError>> {
             if lex.peek().kind == TokenKind::Identifier {
                 let t = lex.next();
                 let mut seq = vec![t.source.to_string()];
-                while lex.peek().kind == TokenKind::Dot {
-                    lex.next();
-                    let (l, _) = try_parse!(expect(lex, TokenKind::Identifier));
-                    let t = l.next();
-                    lex = l;
-                    seq.push(t.source.to_string());
-                }
+                seq.extend(
+                    try_parse!(lex, sep_by(lex, parse_ident, parse_dot))
+                        .into_iter()
+                        .map(|t| t.source.to_string()),
+                );
                 return Parser::Success(lex, Box::new(Expr::RelAccess(seq)));
             }
-            return Parser::Fail(lex, format!("Unexpect token `{t}`").into());
+            Parser::Fail(lex, format!("Unexpect token `{t}`").into())
         }
-        _ => {
-            return Parser::Fail(lex, format!("Unexpect token `{t}`").into());
-        }
+        _ => Parser::Fail(lex, format!("Unexpect token `{t}`").into()),
     }
 }
 
-fn expect<'lex>(lex: RefLexer, expect: TokenKind) -> Parser<(), Box<dyn StdError>> {
-    let actual = lex.peek().kind;
-    if actual != expect {
-        return Parser::Fail(lex, format!("Expect {expect:?} got {actual:?}").into());
-    }
-    Parser::Success(lex, ())
+macro_rules! make_expect {
+    ($name:ident, $kind:expr, $repr:literal) => {
+        fn $name<'lex>(lex: RefLexer) -> Parser<(), Box<dyn StdError>> {
+            let actual = lex.peek().kind;
+            if actual != $kind {
+                return Parser::Fail(lex, format!("Expect {} got {actual:?}", $repr).into());
+            }
+            lex.next();
+            Parser::Success(lex, ())
+        }
+    };
+    (ret, $name:ident, $kind:expr, $repr:literal) => {
+        fn $name<'lex>(lex: RefLexer) -> Parser<Token, Box<dyn StdError>> {
+            let actual = lex.peek().kind;
+            if actual != $kind {
+                return Parser::Fail(lex, format!("Expect {} got {actual:?}", $repr).into());
+            }
+            let t = lex.next();
+            Parser::Success(lex, t)
+        }
+    };
 }
+
+make_expect! {parse_dot, TokenKind::Dot, "." }
+make_expect! {parse_comma, TokenKind::Comma, "," }
+make_expect! {parse_eq, TokenKind::Eq, "=" }
+make_expect! {parse_close_curly, TokenKind::CloseCurly, "}" }
+make_expect! {parse_eof, TokenKind::EOF, "EOF" }
+make_expect! {ret, parse_ident, TokenKind::Identifier, "identifier" }
 
 #[cfg(test)]
 mod tests {
@@ -339,8 +386,10 @@ mod tests {
     #[test]
     fn test_parse_missing_comma() {
         let source = r#"
-            key = 1
-            other = 2,
+            test = {
+                key = 1
+                other = 2,
+            }
         "#;
         let result = parse_str(source);
         assert!(result.is_err());
@@ -495,7 +544,7 @@ mod tests {
         let gss = parse_str(source_path).expect("Should parse");
         for field in gss.get_fields() {
             assert!(["a", "b", "c"].contains(&field.as_str()))
-        };
+        }
     }
 
     #[test]

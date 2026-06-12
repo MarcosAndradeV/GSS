@@ -1,0 +1,4 @@
+test = {
+    key = 1
+    other = 2
+}
