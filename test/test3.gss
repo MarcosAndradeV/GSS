@@ -1,4 +1,4 @@
 test = {
-    key = 1
+    key = 1,
     other = 2
 }

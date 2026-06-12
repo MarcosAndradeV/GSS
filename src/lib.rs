@@ -485,6 +485,10 @@ mod tests {
         assert_eq!(gss2.get::<i32>(&["style", "image1", "top"]), Some(&50));
         assert_eq!(gss2.get::<i32>(&["style", "image2", "top"]), Some(&50));
         assert_eq!(gss2.get::<i32>(&["style", "image2", "left"]), Some(&50));
+
+        let gss3 = load_gss_from_file("test/test3.gss").expect("Should load test3.gss");
+        assert_eq!(gss3.get::<i32>(&["test", "key"]), Some(&1));
+        assert_eq!(gss3.get::<i32>(&["test", "other"]), Some(&2));
     }
 
     #[test]
