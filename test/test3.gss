@@ -1,4 +1,5 @@
 test = {
     key = 1,
-    other = 2
+    other = 2,
+    hex = 0x32,
 }

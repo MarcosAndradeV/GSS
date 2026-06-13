@@ -45,7 +45,7 @@ impl Object {
 
             if let Some(string) = v.downcast_ref::<String>() {
                 println!("\"{}\"", string);
-            } else if let Some(i) = v.downcast_ref::<i32>() {
+            } else if let Some(i) = v.downcast_ref::<u32>() {
                 println!("{}", i);
             } else if let Some(i) = v.downcast_ref::<f32>() {
                 println!("{}", i);
@@ -242,7 +242,7 @@ fn parse_value<'lex>(mut lex: RefLexer) -> Parser<Value, Box<dyn StdError>> {
     let t = lex.next();
     match t.kind {
         TokenKind::Number(base) => {
-            let x = match i32::from_str_radix(t.source(), base.radix()) {
+            let x = match u32::from_str_radix(t.source(), base.radix()) {
                 Ok(x) => x,
                 Err(err) => return Parser::Fail(lex, err.into()),
             };
@@ -355,7 +355,7 @@ mod tests {
 
         // Test basic values
         assert_eq!(gss.get::<String>(&["name"]), Some(&"GSS".to_string()));
-        assert_eq!(gss.get::<i32>(&["version"]), Some(&1));
+        assert_eq!(gss.get::<u32>(&["version"]), Some(&1));
         assert_eq!(gss.get::<bool>(&["active"]), Some(&true));
 
         // Test nested values
@@ -368,7 +368,7 @@ mod tests {
         // Test non-existent keys / incorrect types
         assert_eq!(gss.get::<String>(&["non_existent"]), None);
         assert_eq!(gss.get::<String>(&["settings", "non_existent"]), None);
-        assert_eq!(gss.get::<i32>(&["active"]), None); // Type mismatch
+        assert_eq!(gss.get::<u32>(&["active"]), None); // Type mismatch
     }
 
     #[test]
@@ -407,7 +407,7 @@ mod tests {
     #[test]
     fn test_empty_path() {
         let gss = parse_str("a = 1,").expect("Should parse");
-        assert_eq!(gss.get::<i32>(&[]), None);
+        assert_eq!(gss.get::<u32>(&[]), None);
     }
 
     #[test]
@@ -446,23 +446,23 @@ mod tests {
         let gss = parse_str(source).expect("Should parse references successfully");
 
         // Test Expr::Symbol at root level
-        assert_eq!(gss.get::<i32>(&["ref_symbol"]), Some(&42));
+        assert_eq!(gss.get::<u32>(&["ref_symbol"]), Some(&42));
 
         // Test Expr::Symbol inside nested object
-        assert_eq!(gss.get::<i32>(&["nested", "ref_symbol_nested"]), Some(&42));
+        assert_eq!(gss.get::<u32>(&["nested", "ref_symbol_nested"]), Some(&42));
 
         // Test Expr::Access at root level
-        assert_eq!(gss.get::<i32>(&["ref_access"]), Some(&100));
+        assert_eq!(gss.get::<u32>(&["ref_access"]), Some(&100));
 
         // Test Expr::Access inside nested object
-        assert_eq!(gss.get::<i32>(&["other", "ref_access_nested"]), Some(&100));
+        assert_eq!(gss.get::<u32>(&["other", "ref_access_nested"]), Some(&100));
 
         // Test chained references
-        assert_eq!(gss.get::<i32>(&["chained2"]), Some(&42));
+        assert_eq!(gss.get::<u32>(&["chained2"]), Some(&42));
 
         // Test invalid reference (non-existent key)
-        assert_eq!(gss.get::<i32>(&["non_existent_ref"]), None);
-        assert_eq!(gss.get::<i32>(&["nested_non_existent_ref"]), None);
+        assert_eq!(gss.get::<u32>(&["non_existent_ref"]), None);
+        assert_eq!(gss.get::<u32>(&["nested_non_existent_ref"]), None);
 
         // Test type mismatch
         assert_eq!(gss.get::<String>(&["ref_symbol"]), None);
@@ -475,20 +475,21 @@ mod tests {
     fn test_load_files() {
         let gss1 = load_gss_from_file("test/test.gss").expect("Should load test.gss");
         assert_eq!(gss1.get::<Percent>(&["style", "top"]), Some(&0.89));
-        assert_eq!(gss1.get::<i32>(&["style", "count"]), Some(&69));
+        assert_eq!(gss1.get::<u32>(&["style", "count"]), Some(&69));
         assert_eq!(
             gss1.get::<String>(&["style", "inner", "link"]),
             Some(&"google.com".to_string())
         );
 
         let gss2 = load_gss_from_file("test/test2.gss").expect("Should load test2.gss");
-        assert_eq!(gss2.get::<i32>(&["style", "image1", "top"]), Some(&50));
-        assert_eq!(gss2.get::<i32>(&["style", "image2", "top"]), Some(&50));
-        assert_eq!(gss2.get::<i32>(&["style", "image2", "left"]), Some(&50));
+        assert_eq!(gss2.get::<u32>(&["style", "image1", "top"]), Some(&50));
+        assert_eq!(gss2.get::<u32>(&["style", "image2", "top"]), Some(&50));
+        assert_eq!(gss2.get::<u32>(&["style", "image2", "left"]), Some(&50));
 
         let gss3 = load_gss_from_file("test/test3.gss").expect("Should load test3.gss");
-        assert_eq!(gss3.get::<i32>(&["test", "key"]), Some(&1));
-        assert_eq!(gss3.get::<i32>(&["test", "other"]), Some(&2));
+        assert_eq!(gss3.get::<u32>(&["test", "key"]), Some(&1));
+        assert_eq!(gss3.get::<u32>(&["test", "other"]), Some(&2));
+        assert_eq!(gss3.get::<u32>(&["test", "hex"]), Some(&0x32));
     }
 
     #[test]
@@ -498,7 +499,7 @@ mod tests {
             a = a,
         "#;
         let gss = parse_str(source_direct).expect("Should parse");
-        assert_eq!(gss.get::<i32>(&["a"]), None);
+        assert_eq!(gss.get::<u32>(&["a"]), None);
 
         // Indirect cycle: a = b, b = a,
         let source_indirect = r#"
@@ -506,8 +507,8 @@ mod tests {
             b = a,
         "#;
         let gss = parse_str(source_indirect).expect("Should parse");
-        assert_eq!(gss.get::<i32>(&["a"]), None);
-        assert_eq!(gss.get::<i32>(&["b"]), None);
+        assert_eq!(gss.get::<u32>(&["a"]), None);
+        assert_eq!(gss.get::<u32>(&["b"]), None);
 
         // Path cycle: a = b.x, b = { x = a },
         let source_path = r#"
@@ -517,7 +518,7 @@ mod tests {
             },
         "#;
         let gss = parse_str(source_path).expect("Should parse");
-        assert_eq!(gss.get::<i32>(&["a"]), None);
+        assert_eq!(gss.get::<u32>(&["a"]), None);
     }
 
     #[test]
