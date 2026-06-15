@@ -123,6 +123,20 @@ impl Object {
                 if let Some(v) = obj.inner.get(*c) {
                     if let Some(o) = v.downcast_ref::<Object>() {
                         obj = o;
+                    } else if let Some(expr) = v.downcast_ref::<Expr>() {
+                        obj = match expr {
+                            Expr::Symbol(s) => {
+                                self.get_impl(&[s.as_str()], current_depth + 1, max_depth)?
+                            }
+                            Expr::Access(seq) => {
+                                let tmp: Vec<&str> = seq.iter().map(AsRef::as_ref).collect();
+                                self.get_impl(&tmp, current_depth + 1, max_depth)?
+                            }
+                            Expr::RelAccess(seq) => {
+                                let tmp: Vec<&str> = seq.iter().map(AsRef::as_ref).collect();
+                                obj.get_impl(&tmp, current_depth + 1, max_depth)?
+                            }
+                        };
                     } else {
                         return None;
                     }
@@ -560,5 +574,22 @@ mod tests {
         let gss = parse_str(source_path).expect("Should parse");
         assert_eq!(gss.get_or_default::<f32>(&["a"]), 0.0);
         assert_eq!(gss.get_or::<f32>(&["b"], 23.0), 23.0);
+    }
+
+    #[test]
+    fn test_get_inner_obj() {
+        let source_path = r#"
+            h = {
+                inner = "Hi"
+            }
+            f = {
+                g = h
+            }
+        "#;
+        let gss = parse_str(source_path).expect("Should parse");
+        assert_eq!(
+            gss.get_or_default::<String>(&["f", "g", "inner"]),
+            "Hi".to_string()
+        );
     }
 }
