@@ -5,7 +5,7 @@ edition = "2024"
 default-run = "gss_test"
 
 [dependencies]
-lex-just-parse = { version = "0.3.0" }
+lex-just-parse = { version = "0.4.0" }
 
 [features]
 interning = ["lex-just-parse/interning"]

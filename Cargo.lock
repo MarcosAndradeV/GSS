@@ -11,6 +11,6 @@ dependencies = [
 
 [[package]]
 name = "lex-just-parse"
-version = "0.3.0"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7c12a83498738aad36b0df7c30c239920534e60daeed14faa5769e61b4219e86"
+checksum = "4b9139c07d6b0ee52f305ff914e0a2936c0f82cf08f230ac726a38d711af5aa6"
