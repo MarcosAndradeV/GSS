@@ -175,7 +175,10 @@ impl Object {
 
 pub fn load_gss_from_file<P: AsRef<Path>>(file_path: P) -> Result<Gss, Box<dyn StdError>> {
     let source = fs::read_to_string(file_path.as_ref())?;
+    #[cfg(not(feature = "interning"))]
     let mut lex = Lexer::new(&source);
+    #[cfg(feature = "interning")]
+    let mut lex = Lexer::new(file_path.as_ref().to_string_lossy(), &source);
 
     let gss = parse(file_path, &mut lex)?;
 
