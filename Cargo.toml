@@ -9,6 +9,7 @@ lex-just-parse = { version = "0.3.0" }
 
 [features]
 interning = ["lex-just-parse/interning"]
+internal-api = []
 
 [[bin]]
 name = "gss_test"

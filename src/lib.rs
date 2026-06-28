@@ -182,6 +182,14 @@ pub fn load_gss_from_file<P: AsRef<Path>>(file_path: P) -> Result<Gss, Box<dyn S
     Ok(gss)
 }
 
+#[cfg(feature = "internal-api")]
+pub fn internal_parse<'lex, P: AsRef<Path>>(
+    file_path: P,
+    lex: RefLexer<'lex>,
+) -> Result<Gss, Box<dyn StdError>> {
+    parse(file_path, lex)
+}
+
 fn parse<'lex, P: AsRef<Path>>(
     file_path: P,
     lex: RefLexer<'lex>,
@@ -196,6 +204,11 @@ fn parse<'lex, P: AsRef<Path>>(
         )
         .into()),
     }
+}
+
+#[cfg(feature = "internal-api")]
+pub fn internal_parse_gss<'lex>(lex: RefLexer) -> Parser<Gss, Box<dyn StdError>> {
+    parse_gss(lex)
 }
 
 fn parse_gss<'lex>(mut lex: RefLexer) -> Parser<Gss, Box<dyn StdError>> {
@@ -224,6 +237,11 @@ fn parse_gss<'lex>(mut lex: RefLexer) -> Parser<Gss, Box<dyn StdError>> {
     Parser::Success(lex, object)
 }
 
+#[cfg(feature = "internal-api")]
+pub fn internal_parse_object<'lex>(lex: RefLexer) -> Parser<Object, Box<dyn StdError>> {
+    parse_object(lex)
+}
+
 fn parse_object<'lex>(mut lex: RefLexer) -> Parser<Object, Box<dyn StdError>> {
     let mut object = Object::new();
     if lex.peek().kind == TokenKind::CloseCurly {
@@ -250,6 +268,11 @@ fn parse_object<'lex>(mut lex: RefLexer) -> Parser<Object, Box<dyn StdError>> {
         }
     }
     Parser::Success(lex, object)
+}
+
+#[cfg(feature = "internal-api")]
+pub fn internal_parse_value<'lex>(lex: RefLexer) -> Parser<Value, Box<dyn StdError>> {
+    parse_value(lex)
 }
 
 fn parse_value<'lex>(mut lex: RefLexer) -> Parser<Value, Box<dyn StdError>> {
