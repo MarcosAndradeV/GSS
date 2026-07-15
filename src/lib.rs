@@ -175,14 +175,22 @@ impl Object {
 
 pub fn load_gss_from_file<P: AsRef<Path>>(file_path: P) -> Result<Gss, Box<dyn StdError>> {
     let source = fs::read_to_string(file_path.as_ref())?;
-    #[cfg(not(feature = "interning"))]
-    let mut lex = Lexer::new(&source);
-    #[cfg(feature = "interning")]
-    let mut lex = Lexer::new(file_path.as_ref().to_string_lossy(), &source);
+    let mut lex = get_lexer(&source, #[cfg(feature = "interning")] &file_path);
 
     let gss = parse(file_path, &mut lex)?;
 
     Ok(gss)
+}
+
+fn get_lexer<#[cfg(feature = "interning")] P: AsRef<Path>>(
+    source: &str,
+    #[cfg(feature = "interning")] file_path: P,
+) -> Lexer<'_> {
+    #[cfg(not(feature = "interning"))]
+    let lex = Lexer::new(source);
+    #[cfg(feature = "interning")]
+    let lex = Lexer::new(file_path.as_ref().to_string_lossy(), source);
+    lex
 }
 
 #[cfg(feature = "internal-api")]
@@ -243,6 +251,12 @@ fn parse_gss<'lex>(mut lex: RefLexer) -> Parser<Gss, Box<dyn StdError>> {
 #[cfg(feature = "internal-api")]
 pub fn internal_parse_object<'lex>(lex: RefLexer) -> Parser<Object, Box<dyn StdError>> {
     parse_object(lex)
+}
+
+#[cfg(feature = "internal-api")]
+pub fn internal_parse_object_from_str<'lex>(s: &str) -> Result<Object, Box<dyn StdError>> {
+    let mut lex = get_lexer(s, #[cfg(feature = "interning")] "<object_from_str>");
+    parse_object(&mut lex).success().map_err(|(_, err)| err)
 }
 
 fn parse_object<'lex>(mut lex: RefLexer) -> Parser<Object, Box<dyn StdError>> {
@@ -373,10 +387,9 @@ make_expect! {ret, parse_ident, TokenKind::Identifier, "identifier" }
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lex_just_parse::lexer::Lexer;
 
     fn parse_str(source: &str) -> Result<Gss, Box<dyn std::error::Error>> {
-        let mut lex = Lexer::new(source);
+        let mut lex = get_lexer(source, #[cfg(feature = "interning")] file!());
         parse("test_string", &mut lex)
     }
 
