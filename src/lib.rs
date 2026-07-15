@@ -175,7 +175,11 @@ impl Object {
 
 pub fn load_gss_from_file<P: AsRef<Path>>(file_path: P) -> Result<Gss, Box<dyn StdError>> {
     let source = fs::read_to_string(file_path.as_ref())?;
-    let mut lex = get_lexer(&source, #[cfg(feature = "interning")] &file_path);
+    let mut lex = get_lexer(
+        &source,
+        #[cfg(feature = "interning")]
+        &file_path,
+    );
 
     let gss = parse(file_path, &mut lex)?;
 
@@ -255,12 +259,19 @@ pub fn internal_parse_object<'lex>(lex: RefLexer) -> Parser<Object, Box<dyn StdE
 
 #[cfg(feature = "internal-api")]
 pub fn internal_parse_object_from_str<'lex>(s: &str) -> Result<Object, Box<dyn StdError>> {
-    let mut lex = get_lexer(s, #[cfg(feature = "interning")] "<object_from_str>");
+    let mut lex = get_lexer(
+        s,
+        #[cfg(feature = "interning")]
+        "<object_from_str>",
+    );
     parse_object(&mut lex).success().map_err(|(_, err)| err)
 }
 
 fn parse_object<'lex>(mut lex: RefLexer) -> Parser<Object, Box<dyn StdError>> {
     let mut object = Object::new();
+    if lex.peek().kind == TokenKind::OpenCurly {
+        try_parse!(lex, parse_open_curly(lex));
+    }
     if lex.peek().kind == TokenKind::CloseCurly {
         lex.next();
         return Parser::Success(lex, object);
@@ -380,6 +391,7 @@ macro_rules! make_expect {
 make_expect! {parse_dot, TokenKind::Dot, "." }
 make_expect! {parse_comma, TokenKind::Comma, "," }
 make_expect! {parse_eq, TokenKind::Eq, "=" }
+make_expect! {parse_open_curly, TokenKind::OpenCurly, "{" }
 make_expect! {parse_close_curly, TokenKind::CloseCurly, "}" }
 make_expect! {parse_eof, TokenKind::EOF, "EOF" }
 make_expect! {ret, parse_ident, TokenKind::Identifier, "identifier" }
@@ -389,7 +401,11 @@ mod tests {
     use super::*;
 
     fn parse_str(source: &str) -> Result<Gss, Box<dyn std::error::Error>> {
-        let mut lex = get_lexer(source, #[cfg(feature = "interning")] file!());
+        let mut lex = get_lexer(
+            source,
+            #[cfg(feature = "interning")]
+            file!(),
+        );
         parse("test_string", &mut lex)
     }
 
