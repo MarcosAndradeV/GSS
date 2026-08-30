@@ -151,6 +151,7 @@ impl FromGssValue for String {
 }
 
 #[derive(Debug)]
+#[cfg_attr(feature = "value-enum", derive(Clone, PartialEq))]
 pub struct Object {
     inner: HashMap<String, Value>,
     max_depth: usize,
@@ -158,6 +159,7 @@ pub struct Object {
 }
 
 #[derive(Debug)]
+#[cfg_attr(feature = "value-enum", derive(Clone, PartialEq))]
 pub enum Expr {
     Symbol(String),
     Access(Vec<String>),
