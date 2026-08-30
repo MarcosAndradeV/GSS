@@ -505,12 +505,41 @@ fn parse_object<'lex>(mut lex: RefLexer, allow_redefinition: bool) -> Parser<Obj
     Parser::Success(lex, object)
 }
 
+fn parse_list<'lex>(mut lex: RefLexer, allow_redefinition: bool) -> Parser<Vec<Value>, Box<dyn StdError>> {
+    try_parse!(lex, parse_open_bracket(lex));
+    if lex.peek().kind == TokenKind::CloseBracket {
+        lex.next();
+        return Parser::Success(lex, Vec::new());
+    }
+    let items = try_parse!(
+        lex,
+        sep_by(
+            lex,
+            |mut lex| {
+                if lex.peek().kind == TokenKind::CloseBracket {
+                    return Parser::Fail(lex, "End of list".into());
+                }
+                let v = try_parse!(lex, parse_value(lex, allow_redefinition));
+                Parser::Success(lex, v)
+            },
+            parse_maybe_comma
+        )
+    );
+    try_parse!(lex, parse_close_bracket(lex));
+    Parser::Success(lex, items)
+}
+
+
 #[cfg(feature = "internal-api")]
 pub fn internal_parse_value<'lex>(lex: RefLexer) -> Parser<Value, Box<dyn StdError>> {
     parse_value(lex, false)
 }
 
 fn parse_value<'lex>(mut lex: RefLexer, allow_redefinition: bool) -> Parser<Value, Box<dyn StdError>> {
+    if lex.peek().kind == TokenKind::OpenBracket {
+        let list = try_parse!(lex, parse_list(lex, allow_redefinition));
+        return Parser::Success(lex, new_vec(list));
+    }
     let t = lex.next();
     match t.kind {
         TokenKind::Number(base) => {
@@ -541,6 +570,10 @@ fn parse_value<'lex>(mut lex: RefLexer, allow_redefinition: bool) -> Parser<Valu
         TokenKind::OpenCurly => {
             let object = try_parse!(lex, parse_object(lex, allow_redefinition));
             Parser::Success(lex, new_object(object))
+        }
+        TokenKind::OpenBracket => {
+            let list = try_parse!(lex, parse_list(lex, allow_redefinition));
+            Parser::Success(lex, new_vec(list))
         }
         TokenKind::Identifier => {
             if lex.peek().kind == TokenKind::Dot {
@@ -595,6 +628,8 @@ macro_rules! make_expect {
     };
 }
 
+make_expect! {parse_open_bracket, TokenKind::OpenBracket, "[" }
+make_expect! {parse_close_bracket, TokenKind::CloseBracket, "]" }
 make_expect! {parse_dot, TokenKind::Dot, "." }
 make_expect! {parse_comma, TokenKind::Comma, "," }
 make_expect! {parse_eq, TokenKind::Eq, "=" }
@@ -643,6 +678,25 @@ mod tests {
         assert_eq!(gss.get::<String>(&["non_existent"]), None);
         assert_eq!(gss.get::<String>(&["settings", "non_existent"]), None);
         assert_eq!(gss.get::<u32>(&["active"]), None); // Type mismatch
+    }
+
+    #[test]
+    fn test_parse_list() {
+        let source = r#"
+            numbers = [1, 2, 3],
+            mixed = ["hello", 42, true],
+            empty = [],
+            nested = [[1, 2], [3, 4]],
+        "#;
+        let gss = parse_str(source).expect("Should parse lists successfully");
+
+        assert_eq!(gss.get_as::<Vec<u32>>(&["numbers"]), Some(vec![1, 2, 3]));
+        assert!(gss.get::<Vec<Value>>(&["mixed"]).is_some());
+        assert_eq!(gss.get_as::<Vec<u32>>(&["empty"]), Some(vec![]));
+        assert_eq!(
+            gss.get_as::<Vec<Vec<u32>>>(&["nested"]),
+            Some(vec![vec![1, 2], vec![3, 4]])
+        );
     }
 
     #[test]
