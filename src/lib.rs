@@ -8,7 +8,77 @@ use lex_just_parse::lexer::*;
 use lex_just_parse::parser::{Parser, RefLexer, many1, sep_by};
 use lex_just_parse::try_parse;
 
-pub type Value = Box<dyn Any + 'static>;
+#[cfg(not(feature = "value-enum"))]
+pub type Value = Box<dyn std::any::Any + 'static>;
+
+#[cfg(feature = "value-enum")]
+#[derive(Debug, Clone, PartialEq)]
+pub enum Value {
+    Number(u32),
+    Float(f32),
+    Bool(bool),
+    String(String),
+    Object(Object),
+    Expr(Expr),
+}
+
+#[cfg(feature = "value-enum")]
+impl Value {
+    pub fn downcast_ref<T: 'static>(&self) -> Option<&T> {
+        let any: &dyn std::any::Any = match self {
+            Value::Number(x) => x,
+            Value::Float(x) => x,
+            Value::Bool(x) => x,
+            Value::String(x) => x,
+            Value::Object(x) => x,
+            Value::Expr(x) => x,
+        };
+        any.downcast_ref::<T>()
+    }
+}
+
+// Helper constructors to build Values under both configurations
+fn new_number(x: u32) -> Value {
+    #[cfg(not(feature = "value-enum"))]
+    { Box::new(x) }
+    #[cfg(feature = "value-enum")]
+    { Value::Number(x) }
+}
+
+fn new_float(x: f32) -> Value {
+    #[cfg(not(feature = "value-enum"))]
+    { Box::new(x) }
+    #[cfg(feature = "value-enum")]
+    { Value::Float(x) }
+}
+
+fn new_bool(x: bool) -> Value {
+    #[cfg(not(feature = "value-enum"))]
+    { Box::new(x) }
+    #[cfg(feature = "value-enum")]
+    { Value::Bool(x) }
+}
+
+fn new_string(x: String) -> Value {
+    #[cfg(not(feature = "value-enum"))]
+    { Box::new(x) }
+    #[cfg(feature = "value-enum")]
+    { Value::String(x) }
+}
+
+fn new_object(x: Object) -> Value {
+    #[cfg(not(feature = "value-enum"))]
+    { Box::new(x) }
+    #[cfg(feature = "value-enum")]
+    { Value::Object(x) }
+}
+
+fn new_expr(x: Expr) -> Value {
+    #[cfg(not(feature = "value-enum"))]
+    { Box::new(x) }
+    #[cfg(feature = "value-enum")]
+    { Value::Expr(x) }
+}
 pub type Percent = f32;
 pub type Gss = Object;
 
