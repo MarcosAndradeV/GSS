@@ -943,4 +943,30 @@ mod tests {
         obj.set_allow_redefinition(false);
         assert!(!obj.allow_redefinition());
     }
+
+    #[cfg(feature = "value-enum")]
+    #[test]
+    fn test_value_enum_specifics() {
+        let source = "a = 42, b = { x = 1 }, c = \"hello\"";
+        let gss = parse_str(source).unwrap();
+        
+        let a_val = gss.get_value(&["a"]).unwrap();
+        let b_val = gss.get_value(&["b"]).unwrap();
+        let c_val = gss.get_value(&["c"]).unwrap();
+        
+        // Assert equality works directly on Value
+        assert_eq!(a_val, &Value::Number(42));
+        assert_eq!(c_val, &Value::String("hello".to_string()));
+        
+        // Assert cloning works directly on Value
+        let a_clone = a_val.clone();
+        assert_eq!(a_clone, Value::Number(42));
+        
+        let b_clone = b_val.clone();
+        if let Value::Object(ref obj) = b_clone {
+            assert_eq!(obj.get::<u32>(&["x"]), Some(&1));
+        } else {
+            panic!("Expected Value::Object");
+        }
+    }
 }
