@@ -1,4 +1,3 @@
-use std::any::Any;
 use std::collections::HashMap;
 use std::error::Error as StdError;
 use std::fs;
@@ -444,14 +443,6 @@ fn get_lexer<#[cfg(feature = "interning")] P: AsRef<Path>>(
     lex
 }
 
-#[cfg(feature = "internal-api")]
-pub fn internal_parse<'lex, P: AsRef<Path>>(
-    file_path: P,
-    lex: RefLexer<'lex>,
-) -> Result<Gss, Box<dyn StdError>> {
-    parse(file_path, lex, false)
-}
-
 fn parse<'lex, P: AsRef<Path>>(
     file_path: P,
     lex: RefLexer<'lex>,
@@ -467,11 +458,6 @@ fn parse<'lex, P: AsRef<Path>>(
         )
         .into()),
     }
-}
-
-#[cfg(feature = "internal-api")]
-pub fn internal_parse_gss<'lex>(lex: RefLexer) -> Parser<Gss, Box<dyn StdError>> {
-    parse_gss(lex, false)
 }
 
 fn parse_gss<'lex>(mut lex: RefLexer, allow_redefinition: bool) -> Parser<Gss, Box<dyn StdError>> {
@@ -499,11 +485,6 @@ fn parse_gss<'lex>(mut lex: RefLexer, allow_redefinition: bool) -> Parser<Gss, B
         }
     }
     Parser::Success(lex, object)
-}
-
-#[cfg(feature = "internal-api")]
-pub fn internal_parse_object<'lex>(lex: RefLexer) -> Parser<Object, Box<dyn StdError>> {
-    parse_object(lex, false)
 }
 
 #[cfg(feature = "internal-api")]
@@ -574,8 +555,13 @@ fn parse_list<'lex>(mut lex: RefLexer, allow_redefinition: bool) -> Parser<Vec<V
 
 
 #[cfg(feature = "internal-api")]
-pub fn internal_parse_value<'lex>(lex: RefLexer) -> Parser<Value, Box<dyn StdError>> {
-    parse_value(lex, false)
+pub fn internal_parse_value_from_str<'lex>(s: &str) -> Result<Value, Box<dyn StdError>> {
+    let mut lex = get_lexer(
+        s,
+        #[cfg(feature = "interning")]
+        "<value_from_str>",
+    );
+    parse_value(&mut lex, false).success().map_err(|(_, err)| err)
 }
 
 fn parse_value<'lex>(mut lex: RefLexer, allow_redefinition: bool) -> Parser<Value, Box<dyn StdError>> {
@@ -1063,19 +1049,19 @@ mod tests {
     fn test_value_enum_specifics() {
         let source = "a = 42, b = { x = 1 }, c = \"hello\"";
         let gss = parse_str(source).unwrap();
-        
+
         let a_val = gss.get_value(&["a"]).unwrap();
         let b_val = gss.get_value(&["b"]).unwrap();
         let c_val = gss.get_value(&["c"]).unwrap();
-        
+
         // Assert equality works directly on Value
         assert_eq!(a_val, &Value::Number(42));
         assert_eq!(c_val, &Value::String("hello".to_string()));
-        
+
         // Assert cloning works directly on Value
         let a_clone = a_val.clone();
         assert_eq!(a_clone, Value::Number(42));
-        
+
         let b_clone = b_val.clone();
         if let Value::Object(ref obj) = b_clone {
             assert_eq!(obj.get::<u32>(&["x"]), Some(&1));
@@ -1097,14 +1083,14 @@ mod tests {
         // Verify direct retrieval and conversion to Vec<T>
         assert_eq!(gss.get_as::<Vec<u32>>(&["ints"]), Some(vec![1, 2, 3]));
         assert_eq!(gss.get_as::<Vec<i32>>(&["ints"]), Some(vec![1, 2, 3]));
-        
+
         // Verify nested lists
         let nested = gss.get_as::<Vec<Vec<u32>>>(&["nested"]).unwrap();
         assert_eq!(nested, vec![vec![1, 2], vec![3, 4]]);
 
         // Empty vector
         assert_eq!(gss.get_as::<Vec<u32>>(&["empty"]), Some(vec![]));
-        
+
         // Mixed list types can be retrieved as Vec<Value>
         let mixed = gss.get_as::<Vec<Value>>(&["mixed"]).unwrap();
         assert_eq!(mixed.len(), 3);
