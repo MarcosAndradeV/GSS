@@ -5,5 +5,5 @@ fn main() {
     assert!(s.is_ok(), "{s:?}");
     let s = s.unwrap();
     s.dump(0);
-    // println!("{:?}", s.get::<i32>(&["style", "image2", "top"]));
+    println!("test.hex as i32: {:?}", s.get_as::<i32>(&["test", "hex"]));
 }

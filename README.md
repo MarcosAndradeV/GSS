@@ -20,9 +20,11 @@ Inspired by an idea from [Tsoding](https://twitch.tv/tsoding).
 - [Rust API Reference](#rust-api-reference)
   - [Loading & Parsing](#loading--parsing)
   - [Querying Values](#querying-values)
+  - [Flexible Type Conversion with `FromGssValue`](#flexible-type-conversion-with-fromgssvalue)
+  - [Allowing Key Redefinitions](#allowing-key-redefinitions)
   - [Cycle Detection & Depth Limiting](#cycle-detection--depth-limiting)
   - [Inspection & Debugging](#inspection--debugging)
-- [Type Mapping](#type-mapping)
+- [Type Mapping & Conversion Reference](#type-mapping--conversion-reference)
 - [Cargo Features](#cargo-features)
 - [Getting Started](#getting-started)
   - [Prerequisites](#prerequisites)
@@ -39,7 +41,7 @@ Inspired by an idea from [Tsoding](https://twitch.tv/tsoding).
 
 ## Overview
 
-**Graph Style Sheets (GSS)** provides a simple yet powerful declarative format for configuring hierarchical and graph-like structures. Unlike static serialization formats like JSON or TOML, GSS natively supports **dynamic symbol resolution**, **absolute and relative property references**, **percentages**, and **cycle protection**.
+**Graph Style Sheets (GSS)** provides a simple yet powerful declarative format for configuring hierarchical and graph-like structures. Unlike static serialization formats like JSON or TOML, GSS natively supports **dynamic symbol resolution**, **absolute and relative property references**, **percentages**, **cycle protection**, and **flexible Rust type conversion**.
 
 ---
 
@@ -53,8 +55,10 @@ Inspired by an idea from [Tsoding](https://twitch.tv/tsoding).
   - **Relative / Sibling Dot Access**: `height = .width`
   - **Chained Lookups**: Transparently traverses reference chains across objects.
 - **Cycle Detection**: Configurable recursion depth limit (`max_depth`, default `20`) prevents infinite loops caused by circular dependencies (`a = b, b = a`).
-- **Safety & Validation**: Duplicate key detection at parse time prevents accidental overrides.
-- **Ergonomic Rust API**: Type-safe downcasting using generic getters (`.get::<T>()`, `.get_or()`, `.get_or_default()`).
+- **Flexible Key Redefinition Option**: Strict parse-time validation by default, with an option (`allow_redefinition`) to allow overriding duplicate keys.
+- **Ergonomic Rust API**:
+  - Exact reference downcasting via `.get::<T>()`.
+  - Type-converting getters (`.get_as::<T>()`, `.get_or::<T>()`, `.get_or_default::<T>()`) supporting all common Rust integer types (`i8`-`i128`, `isize`, `u8`-`u128`, `usize`), floats (`f32`, `f64`), `bool`, and `String`.
 
 ---
 
@@ -70,14 +74,14 @@ Trailing and separating commas are optional in object definitions.
 
 ### Value Types
 
-| Type | Syntax Example | Rust Downcast Type | Description |
+| Type | Syntax Example | Rust Storage Type | Supported `get_as::<T>()` Conversions |
 | :--- | :--- | :--- | :--- |
-| **Integer** | `count = 42,`<br>`hex = 0x32,` | `u32` | Standard integer with radix support (decimal, hex, binary, octal). |
-| **Float** | `price = 42.12,`<br>`scale = 0.5,` | `f32` | Single-precision IEEE 754 float. |
-| **Percentage** | `width = 89%,` | `Percent` (`f32`) | Automatically parsed as fractional float (`0.89`). |
-| **Boolean** | `visible = true,`<br>`debug = false,` | `bool` | Boolean literal. |
-| **String** | `title = "Hello World",` | `String` | Quoted string literal with escape sequence support. |
-| **Object** | `nested = { ... }` | `Object` / `Gss` | Nested key-value dictionary. |
+| **Integer** | `count = 42,`<br>`hex = 0x32,` | `u32` | `i8`..`i128`, `isize`, `u8`..`u128`, `usize`, `f32`, `f64` |
+| **Float** | `price = 42.12,`<br>`scale = 0.5,` | `f32` | `f32`, `f64`, integer types (if whole number) |
+| **Percentage** | `width = 89%,` | `Percent` (`f32`) | `Percent` (`f32`), `f64` (evaluates as `0.89`) |
+| **Boolean** | `visible = true,`<br>`debug = false,` | `bool` | `bool` |
+| **String** | `title = "Hello World",` | `String` | `String` |
+| **Object** | `nested = { ... }` | `Object` / `Gss` | `&Object` (via `get::<Object>()`) |
 
 ### Nested Objects
 
@@ -149,19 +153,22 @@ chained2 = chained1,  // Resolves to 42
 ### Loading & Parsing
 
 ```rust
-use gss::{load_gss_from_file, parse_str, Gss};
+use gss::{load_gss_from_file, parse_str, parse_str_with_options, Gss};
 use std::error::Error;
 
 fn main() -> Result<(), Box<dyn Error>> {
-    // Parse directly from a string
-    let gss_from_str: Gss = parse_str(r#"
+    // 1. Parse directly from a string (strict mode: no duplicate keys)
+    let gss: Gss = parse_str(r#"
         window = {
             width = 800,
             height = 600,
         }
     "#)?;
 
-    // Or load from a file
+    // 2. Parse from a string allowing key redefinitions
+    let gss_redef: Gss = parse_str_with_options("key = 1, key = 2,", true)?;
+
+    // 3. Or load from a file
     let gss_from_file: Gss = load_gss_from_file("config.gss")?;
 
     Ok(())
@@ -173,16 +180,55 @@ fn main() -> Result<(), Box<dyn Error>> {
 Query values by providing a path of string slices (`&[&str]`):
 
 ```rust
-// 1. Get an Option<&T> (returns None on missing key or type mismatch)
-if let Some(width) = gss.get::<u32>(&["window", "width"]) {
-    println!("Width: {width}");
+// 1. Converted value getter: get_as::<T>()
+// Automatically converts between integer and float types!
+if let Some(width) = gss.get_as::<i32>(&["window", "width"]) {
+    println!("Width (i32): {width}");
 }
 
-// 2. Get cloned value with fallback
-let height = gss.get_or::<u32>(&["window", "height"], 480);
+// 2. Exact reference getter: get::<T>()
+// Returns Option<&T> matching the exact underlying stored type
+if let Some(width_ref) = gss.get::<u32>(&["window", "width"]) {
+    println!("Width ref (&u32): {width_ref}");
+}
 
-// 3. Get cloned value with Default::default() fallback
-let title = gss.get_or_default::<String>(&["window", "title"]); // ""
+// 3. Fallback getter: get_or::<T>()
+let height: i64 = gss.get_or::<i64>(&["window", "height"], 480);
+
+// 4. Default fallback: get_or_default::<T>()
+let title: String = gss.get_or_default::<String>(&["window", "title"]);
+```
+
+### Flexible Type Conversion with `FromGssValue`
+
+The `FromGssValue` trait allows `.get_as::<T>()`, `.get_or::<T>()`, and `.get_or_default::<T>()` to convert values seamlessly into any target Rust type:
+
+```rust
+let gss = parse_str("count = 42, price = 19.95,")?;
+
+// Retrieve as any integer type:
+let as_i32: Option<i32> = gss.get_as(&["count"]);     // Some(42)
+let as_usize: Option<usize> = gss.get_as(&["count"]); // Some(42)
+let as_i64: Option<i64> = gss.get_as(&["count"]);     // Some(42)
+
+// Retrieve as floating-point:
+let as_f64: Option<f64> = gss.get_as(&["price"]);     // Some(19.95)
+let int_as_f32: Option<f32> = gss.get_as(&["count"]); // Some(42.0)
+```
+
+### Allowing Key Redefinitions
+
+By default, GSS rejects duplicate keys within the same scope. If your use-case requires overriding or cascading key definitions, configure `allow_redefinition`:
+
+```rust
+// Via parser options:
+let gss = parse_str_with_options("key = 1, key = 2,", true)?;
+assert_eq!(gss.get_as::<u32>(&["key"]), Some(2));
+
+// On an Object instance:
+let mut obj = Object::new().with_allow_redefinition(true);
+obj.set_allow_redefinition(true);
+assert!(obj.allow_redefinition());
 ```
 
 ### Cycle Detection & Depth Limiting
@@ -213,21 +259,16 @@ gss.dump(0);
 
 ---
 
-## Type Mapping
+## Type Mapping & Conversion Reference
 
-When querying values via `.get::<T>()`, use the corresponding Rust type:
-
-| GSS Syntax | Stored Representation | Queried via `get::<T>()` |
-| :--- | :--- | :--- |
-| `100` / `0x64` | `u32` | `gss.get::<u32>(&[...])` |
-| `3.1415` | `f32` | `gss.get::<f32>(&[...])` |
-| `50%` | `f32` (divided by 100.0) | `gss.get::<Percent>(&[...])` or `gss.get::<f32>(&[...])` |
-| `true` / `false` | `bool` | `gss.get::<bool>(&[...])` |
-| `"sample"` | `String` | `gss.get::<String>(&[...])` |
-| `{ k = v }` | `Object` | `gss.get::<Object>(&[...])` |
-
-> [!NOTE]
-> Integers are stored as `u32` and floats as `f32`. Querying with `i32`, `i64`, or `f64` will return `None` due to `Any` downcasting.
+| GSS Literal Syntax | Underlying Storage | `get::<T>()` (Exact `&T`) | `get_as::<T>()` (Converted `T`) |
+| :--- | :--- | :--- | :--- |
+| `100` / `0x64` | `u32` | `get::<u32>()` | `i8`..`i128`, `isize`, `u8`..`u128`, `usize`, `f32`, `f64` |
+| `3.1415` | `f32` | `get::<f32>()` | `f32`, `f64`, integer types (if integer float) |
+| `50%` | `Percent` (`f32`) | `get::<Percent>()` / `get::<f32>()` | `f32`, `f64` (evaluates as `0.5`) |
+| `true` / `false` | `bool` | `get::<bool>()` | `bool` |
+| `"sample"` | `String` | `get::<String>()` | `String` |
+| `{ k = v }` | `Object` | `get::<Object>()` | — |
 
 ---
 
@@ -283,9 +324,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let gss = parse_str(source)?;
 
-    let color: &String = gss.get(&["button", "background"]).unwrap();
-    let font_size: &u32 = gss.get(&["button", "height"]).unwrap();
-    let opacity: &Percent = gss.get(&["theme", "opacity"]).unwrap();
+    let color: String = gss.get_as(&["button", "background"]).unwrap();
+    let font_size: i32 = gss.get_as(&["button", "height"]).unwrap();
+    let opacity: Percent = gss.get_as(&["theme", "opacity"]).unwrap();
 
     println!("Button Color: {color}");
     println!("Button Height: {font_size}px");
@@ -329,21 +370,23 @@ This runs `src/bin/main.rs`, which parses `test/test3.gss` and pretty-prints the
     │              Object (HashMap)                 │
     │  - Value (Box<dyn Any>)                       │
     │  - Expr (Symbol, Access, RelAccess)           │
+    │  - allow_redefinition / max_depth             │
     └───────────────────────┬───────────────────────┘
-                            │ .get::<T>(&path)
+                            │ .get_as::<T>(&path) / .get::<T>(&path)
                             ▼
               ┌───────────────────────────┐
               │ Recursive Resolver Engine │
               │ (with max_depth cycles)   │
               └─────────────┬─────────────┘
-                            │ Downcast
+                            │ FromGssValue / Downcast
                             ▼
-                       Option<&T>
+                        Option<T>
 ```
 
 - **Lexer & Parser**: Built using `lex-just-parse` combinators (`many1`, `sep_by`, `try_parse!`).
 - **Storage**: `Object` encapsulates a `HashMap<String, Box<dyn Any + 'static>>`.
-- **Expressions**: References are stored as `Expr` enums until evaluated at lookup time via `get_impl`.
+- **Expressions**: References are stored as `Expr` enums until evaluated at lookup time via `get_value_impl`.
+- **Type Coercion**: Handled safely via the `FromGssValue` trait.
 
 ---
 
@@ -393,16 +436,16 @@ cargo build --release
 ## Troubleshooting & Common Pitfalls
 
 ### 1. `get::<T>()` returns `None` for existing keys
-- **Cause**: Type mismatch in `downcast_ref::<T>()`.
-- **Fix**: Verify the Rust type mapping. Integers are `u32` (not `i32`/`usize`), floats are `f32` (not `f64`).
+- **Cause**: Type mismatch with exact `Any` downcasting (e.g., requesting `&i32` or `&usize` when value is stored as `u32`).
+- **Fix**: Use `.get_as::<T>()`, `.get_or::<T>()`, or `.get_or_default::<T>()` instead of `.get::<T>()`. These methods use the `FromGssValue` trait to automatically convert between common Rust numeric types (`i8`-`i128`, `isize`, `u8`-`u128`, `usize`, `f32`, `f64`).
 
 ### 2. Circular reference returns `None`
 - **Cause**: Recursive reference exceeded `max_depth` (e.g. `a = b, b = a`).
 - **Fix**: Check your GSS file for circular definitions or increase depth limit with `gss.set_max_depth(n)`.
 
 ### 3. Parse error: `Redefinition of key <key>`
-- **Cause**: The same key was defined multiple times in the same scope.
-- **Fix**: Ensure keys within an object or at root level are unique.
+- **Cause**: The same key was defined multiple times in the same scope, and strict mode is active.
+- **Fix**: If duplicate keys should override previous definitions, parse using `parse_str_with_options(source, true)` or `load_gss_from_file_with_options(file_path, true)`.
 
 ---
 

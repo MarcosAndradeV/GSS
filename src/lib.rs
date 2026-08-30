@@ -12,10 +12,79 @@ pub type Value = Box<dyn Any + 'static>;
 pub type Percent = f32;
 pub type Gss = Object;
 
+pub trait FromGssValue: Sized {
+    fn from_gss_value(value: &Value) -> Option<Self>;
+}
+
+macro_rules! impl_from_gss_for_int {
+    ($($t:ty),*) => {
+        $(
+            impl FromGssValue for $t {
+                fn from_gss_value(value: &Value) -> Option<Self> {
+                    if let Some(x) = value.downcast_ref::<u32>() {
+                        <$t>::try_from(*x).ok()
+                    } else if let Some(x) = value.downcast_ref::<f32>() {
+                        if x.fract() == 0.0 && *x >= (<$t>::MIN as f32) && *x <= (<$t>::MAX as f32) {
+                            Some(*x as $t)
+                        } else {
+                            None
+                        }
+                    } else if let Some(x) = value.downcast_ref::<$t>() {
+                        Some(*x)
+                    } else {
+                        None
+                    }
+                }
+            }
+        )*
+    };
+}
+
+impl_from_gss_for_int!(u8, u16, u32, u64, u128, usize, i8, i16, i32, i64, i128, isize);
+
+impl FromGssValue for f32 {
+    fn from_gss_value(value: &Value) -> Option<Self> {
+        if let Some(x) = value.downcast_ref::<f32>() {
+            Some(*x)
+        } else if let Some(x) = value.downcast_ref::<u32>() {
+            Some(*x as f32)
+        } else {
+            None
+        }
+    }
+}
+
+impl FromGssValue for f64 {
+    fn from_gss_value(value: &Value) -> Option<Self> {
+        if let Some(x) = value.downcast_ref::<f32>() {
+            Some(*x as f64)
+        } else if let Some(x) = value.downcast_ref::<u32>() {
+            Some(*x as f64)
+        } else if let Some(x) = value.downcast_ref::<f64>() {
+            Some(*x)
+        } else {
+            None
+        }
+    }
+}
+
+impl FromGssValue for bool {
+    fn from_gss_value(value: &Value) -> Option<Self> {
+        value.downcast_ref::<bool>().copied()
+    }
+}
+
+impl FromGssValue for String {
+    fn from_gss_value(value: &Value) -> Option<Self> {
+        value.downcast_ref::<String>().cloned()
+    }
+}
+
 #[derive(Debug)]
 pub struct Object {
     inner: HashMap<String, Value>,
     max_depth: usize,
+    allow_redefinition: bool,
 }
 
 #[derive(Debug)]
@@ -30,7 +99,21 @@ impl Object {
         Self {
             inner: HashMap::new(),
             max_depth: 20,
+            allow_redefinition: false,
         }
+    }
+
+    pub fn with_allow_redefinition(mut self, allow: bool) -> Self {
+        self.allow_redefinition = allow;
+        self
+    }
+
+    pub fn set_allow_redefinition(&mut self, allow: bool) {
+        self.allow_redefinition = allow;
+    }
+
+    pub fn allow_redefinition(&self) -> bool {
+        self.allow_redefinition
     }
 
     pub fn dump(&self, level: usize) {
@@ -93,27 +176,33 @@ impl Object {
     }
 
     pub fn get<T: 'static>(&self, path: &[&str]) -> Option<&T> {
-        self.get_impl(path, 0, self.max_depth)
+        self.get_value_impl(path, 0, self.max_depth)
+            .and_then(|v| v.downcast_ref::<T>())
     }
 
-    pub fn get_or_default<T: Clone + 'static + Default>(&self, path: &[&str]) -> T {
-        self.get_impl(path, 0, self.max_depth)
-            .cloned()
-            .unwrap_or_default()
+    pub fn get_as<T: FromGssValue>(&self, path: &[&str]) -> Option<T> {
+        self.get_value_impl(path, 0, self.max_depth)
+            .and_then(T::from_gss_value)
     }
 
-    pub fn get_or<T: Clone + 'static>(&self, path: &[&str], default: T) -> T {
-        self.get_impl(path, 0, self.max_depth)
-            .cloned()
-            .unwrap_or(default)
+    pub fn get_or_default<T: FromGssValue + Default>(&self, path: &[&str]) -> T {
+        self.get_as::<T>(path).unwrap_or_default()
     }
 
-    fn get_impl<T: 'static>(
-        &self,
+    pub fn get_or<T: FromGssValue>(&self, path: &[&str], default: T) -> T {
+        self.get_as::<T>(path).unwrap_or(default)
+    }
+
+    pub fn get_value(&self, path: &[&str]) -> Option<&Value> {
+        self.get_value_impl(path, 0, self.max_depth)
+    }
+
+    fn get_value_impl<'a>(
+        &'a self,
         path: &[&str],
         current_depth: usize,
         max_depth: usize,
-    ) -> Option<&T> {
+    ) -> Option<&'a Value> {
         if current_depth >= max_depth {
             return None;
         }
@@ -126,15 +215,18 @@ impl Object {
                     } else if let Some(expr) = v.downcast_ref::<Expr>() {
                         obj = match expr {
                             Expr::Symbol(s) => {
-                                self.get_impl(&[s.as_str()], current_depth + 1, max_depth)?
+                                let val = self.get_value_impl(&[s.as_str()], current_depth + 1, max_depth)?;
+                                val.downcast_ref::<Object>()?
                             }
                             Expr::Access(seq) => {
                                 let tmp: Vec<&str> = seq.iter().map(AsRef::as_ref).collect();
-                                self.get_impl(&tmp, current_depth + 1, max_depth)?
+                                let val = self.get_value_impl(&tmp, current_depth + 1, max_depth)?;
+                                val.downcast_ref::<Object>()?
                             }
                             Expr::RelAccess(seq) => {
                                 let tmp: Vec<&str> = seq.iter().map(AsRef::as_ref).collect();
-                                obj.get_impl(&tmp, current_depth + 1, max_depth)?
+                                let val = obj.get_value_impl(&tmp, current_depth + 1, max_depth)?;
+                                val.downcast_ref::<Object>()?
                             }
                         };
                     } else {
@@ -149,19 +241,19 @@ impl Object {
                 if let Some(expr) = v.downcast_ref::<Expr>() {
                     return match expr {
                         Expr::Symbol(s) => {
-                            self.get_impl(&[s.as_str()], current_depth + 1, max_depth)
+                            self.get_value_impl(&[s.as_str()], current_depth + 1, max_depth)
                         }
                         Expr::Access(seq) => {
                             let tmp: Vec<&str> = seq.iter().map(AsRef::as_ref).collect();
-                            self.get_impl(&tmp, current_depth + 1, max_depth)
+                            self.get_value_impl(&tmp, current_depth + 1, max_depth)
                         }
                         Expr::RelAccess(seq) => {
                             let tmp: Vec<&str> = seq.iter().map(AsRef::as_ref).collect();
-                            obj.get_impl(&tmp, current_depth + 1, max_depth)
+                            obj.get_value_impl(&tmp, current_depth + 1, max_depth)
                         }
                     };
                 }
-                return v.downcast_ref::<T>();
+                return Some(v);
             }
         }
         None
@@ -174,6 +266,13 @@ impl Object {
 }
 
 pub fn load_gss_from_file<P: AsRef<Path>>(file_path: P) -> Result<Gss, Box<dyn StdError>> {
+    load_gss_from_file_with_options(file_path, false)
+}
+
+pub fn load_gss_from_file_with_options<P: AsRef<Path>>(
+    file_path: P,
+    allow_redefinition: bool,
+) -> Result<Gss, Box<dyn StdError>> {
     let source = fs::read_to_string(file_path.as_ref())?;
     let mut lex = get_lexer(
         &source,
@@ -181,20 +280,25 @@ pub fn load_gss_from_file<P: AsRef<Path>>(file_path: P) -> Result<Gss, Box<dyn S
         &file_path,
     );
 
-    let gss = parse(file_path, &mut lex)?;
+    let gss = parse(file_path, &mut lex, allow_redefinition)?;
 
     Ok(gss)
 }
 
 /// Parses a GSS string into a `Gss` style context.
 pub fn parse_str(source: &str) -> Result<Gss, Box<dyn StdError>> {
+    parse_str_with_options(source, false)
+}
+
+/// Parses a GSS string with custom parser options into a `Gss` style context.
+pub fn parse_str_with_options(source: &str, allow_redefinition: bool) -> Result<Gss, Box<dyn StdError>> {
     let mut lex = get_lexer(
         source,
         #[cfg(feature = "interning")]
         "<input>",
     );
 
-    parse("<input>", &mut lex)
+    parse("<input>", &mut lex, allow_redefinition)
 }
 
 fn get_lexer<#[cfg(feature = "interning")] P: AsRef<Path>>(
@@ -213,14 +317,15 @@ pub fn internal_parse<'lex, P: AsRef<Path>>(
     file_path: P,
     lex: RefLexer<'lex>,
 ) -> Result<Gss, Box<dyn StdError>> {
-    parse(file_path, lex)
+    parse(file_path, lex, false)
 }
 
 fn parse<'lex, P: AsRef<Path>>(
     file_path: P,
     lex: RefLexer<'lex>,
+    allow_redefinition: bool,
 ) -> Result<Gss, Box<dyn StdError>> {
-    match parse_gss(lex) {
+    match parse_gss(lex, allow_redefinition) {
         Parser::Success(_, object) => Ok(object),
         Parser::Fail(lex, err) => Err(format!(
             "{}:{}: {}",
@@ -234,11 +339,12 @@ fn parse<'lex, P: AsRef<Path>>(
 
 #[cfg(feature = "internal-api")]
 pub fn internal_parse_gss<'lex>(lex: RefLexer) -> Parser<Gss, Box<dyn StdError>> {
-    parse_gss(lex)
+    parse_gss(lex, false)
 }
 
-fn parse_gss<'lex>(mut lex: RefLexer) -> Parser<Gss, Box<dyn StdError>> {
+fn parse_gss<'lex>(mut lex: RefLexer, allow_redefinition: bool) -> Parser<Gss, Box<dyn StdError>> {
     let mut object = Object::new();
+    object.set_allow_redefinition(allow_redefinition);
     if lex.peek().kind == TokenKind::EOF {
         return Parser::Success(lex, object);
     }
@@ -247,7 +353,7 @@ fn parse_gss<'lex>(mut lex: RefLexer) -> Parser<Gss, Box<dyn StdError>> {
         many1(lex, |mut lex| {
             let k = try_parse!(lex, parse_ident(lex));
             try_parse!(lex, parse_eq(lex));
-            let v = try_parse!(lex, parse_value(lex));
+            let v = try_parse!(lex, parse_value(lex, allow_redefinition));
             if lex.peek().kind == TokenKind::Comma {
                 lex.next();
             }
@@ -256,7 +362,7 @@ fn parse_gss<'lex>(mut lex: RefLexer) -> Parser<Gss, Box<dyn StdError>> {
     );
     try_parse!(lex, parse_eof(lex));
     for (key, value) in fields {
-        if object.inner.insert(key.to_string(), value).is_some() {
+        if object.inner.insert(key.to_string(), value).is_some() && !allow_redefinition {
             return Parser::Fail(lex, format!("Redefinition of key {key}").into());
         }
     }
@@ -265,7 +371,7 @@ fn parse_gss<'lex>(mut lex: RefLexer) -> Parser<Gss, Box<dyn StdError>> {
 
 #[cfg(feature = "internal-api")]
 pub fn internal_parse_object<'lex>(lex: RefLexer) -> Parser<Object, Box<dyn StdError>> {
-    parse_object(lex)
+    parse_object(lex, false)
 }
 
 #[cfg(feature = "internal-api")]
@@ -275,11 +381,12 @@ pub fn internal_parse_object_from_str<'lex>(s: &str) -> Result<Object, Box<dyn S
         #[cfg(feature = "interning")]
         "<object_from_str>",
     );
-    parse_object(&mut lex).success().map_err(|(_, err)| err)
+    parse_object(&mut lex, false).success().map_err(|(_, err)| err)
 }
 
-fn parse_object<'lex>(mut lex: RefLexer) -> Parser<Object, Box<dyn StdError>> {
+fn parse_object<'lex>(mut lex: RefLexer, allow_redefinition: bool) -> Parser<Object, Box<dyn StdError>> {
     let mut object = Object::new();
+    object.set_allow_redefinition(allow_redefinition);
     if lex.peek().kind == TokenKind::OpenCurly {
         try_parse!(lex, parse_open_curly(lex));
     }
@@ -294,7 +401,7 @@ fn parse_object<'lex>(mut lex: RefLexer) -> Parser<Object, Box<dyn StdError>> {
             |mut lex| {
                 let k = try_parse!(lex, parse_ident(lex));
                 try_parse!(lex, parse_eq(lex));
-                let v = try_parse!(lex, parse_value(lex));
+                let v = try_parse!(lex, parse_value(lex, allow_redefinition));
                 Parser::Success(lex, (k, v))
             },
             parse_maybe_comma
@@ -302,7 +409,7 @@ fn parse_object<'lex>(mut lex: RefLexer) -> Parser<Object, Box<dyn StdError>> {
     );
     try_parse!(lex, parse_close_curly(lex));
     for (key, value) in fields {
-        if object.inner.insert(key.to_string(), value).is_some() {
+        if object.inner.insert(key.to_string(), value).is_some() && !allow_redefinition {
             return Parser::Fail(lex, format!("Redefinition of key {key}").into());
         }
     }
@@ -311,10 +418,10 @@ fn parse_object<'lex>(mut lex: RefLexer) -> Parser<Object, Box<dyn StdError>> {
 
 #[cfg(feature = "internal-api")]
 pub fn internal_parse_value<'lex>(lex: RefLexer) -> Parser<Value, Box<dyn StdError>> {
-    parse_value(lex)
+    parse_value(lex, false)
 }
 
-fn parse_value<'lex>(mut lex: RefLexer) -> Parser<Value, Box<dyn StdError>> {
+fn parse_value<'lex>(mut lex: RefLexer, allow_redefinition: bool) -> Parser<Value, Box<dyn StdError>> {
     let t = lex.next();
     match t.kind {
         TokenKind::Number(base) => {
@@ -343,7 +450,7 @@ fn parse_value<'lex>(mut lex: RefLexer) -> Parser<Value, Box<dyn StdError>> {
         TokenKind::Identifier if t.source() == "false" => Parser::Success(lex, Box::new(false)),
         TokenKind::StringLiteral => Parser::Success(lex, Box::new(t.unescape())),
         TokenKind::OpenCurly => {
-            let object = try_parse!(lex, parse_object(lex));
+            let object = try_parse!(lex, parse_object(lex, allow_redefinition));
             Parser::Success(lex, Box::new(object))
         }
         TokenKind::Identifier => {
@@ -682,5 +789,86 @@ mod tests {
             gss.get::<String>(&["a", "d", "e"]),
             Some(&"found_it".to_string())
         );
+    }
+
+    #[test]
+    fn test_get_as_common_types() {
+        let source = r#"
+            num = 42,
+            float_val = 3.14,
+            text = "antigravity",
+            flag = true,
+            big_num = 300,
+        "#;
+        let gss = parse_str(source).expect("Should parse");
+
+        // Signed integer conversions
+        assert_eq!(gss.get_as::<i8>(&["num"]), Some(42i8));
+        assert_eq!(gss.get_as::<i16>(&["num"]), Some(42i16));
+        assert_eq!(gss.get_as::<i32>(&["num"]), Some(42i32));
+        assert_eq!(gss.get_as::<i64>(&["num"]), Some(42i64));
+        assert_eq!(gss.get_as::<i128>(&["num"]), Some(42i128));
+        assert_eq!(gss.get_as::<isize>(&["num"]), Some(42isize));
+
+        // Unsigned integer conversions
+        assert_eq!(gss.get_as::<u8>(&["num"]), Some(42u8));
+        assert_eq!(gss.get_as::<u16>(&["num"]), Some(42u16));
+        assert_eq!(gss.get_as::<u32>(&["num"]), Some(42u32));
+        assert_eq!(gss.get_as::<u64>(&["num"]), Some(42u64));
+        assert_eq!(gss.get_as::<u128>(&["num"]), Some(42u128));
+        assert_eq!(gss.get_as::<usize>(&["num"]), Some(42usize));
+
+        // Float conversions
+        assert_eq!(gss.get_as::<f32>(&["float_val"]), Some(3.14f32));
+        assert_eq!(gss.get_as::<f64>(&["float_val"]), Some(3.14f32 as f64));
+        assert_eq!(gss.get_as::<f32>(&["num"]), Some(42.0f32));
+        assert_eq!(gss.get_as::<f64>(&["num"]), Some(42.0f64));
+
+        // Booleans & Strings
+        assert_eq!(gss.get_as::<bool>(&["flag"]), Some(true));
+        assert_eq!(gss.get_as::<String>(&["text"]), Some("antigravity".to_string()));
+
+        // Bounds checking
+        assert_eq!(gss.get_as::<u8>(&["big_num"]), None); // 300 > u8::MAX
+        assert_eq!(gss.get_as::<i8>(&["big_num"]), None); // 300 > i8::MAX
+        assert_eq!(gss.get_as::<u16>(&["big_num"]), Some(300u16));
+
+        // Fallbacks with get_or and get_or_default
+        assert_eq!(gss.get_or::<i32>(&["num"], 0), 42);
+        assert_eq!(gss.get_or::<i32>(&["missing"], 99), 99);
+        assert_eq!(gss.get_or_default::<i64>(&["num"]), 42i64);
+        assert_eq!(gss.get_or_default::<i64>(&["missing"]), 0i64);
+    }
+
+    #[test]
+    fn test_allow_redefinition() {
+        let source_root = r#"
+            key = 1,
+            key = 2,
+        "#;
+        // Default (false) should fail
+        assert!(parse_str(source_root).is_err());
+
+        // With allow_redefinition = true
+        let gss = parse_str_with_options(source_root, true).expect("Should allow redefinition");
+        assert_eq!(gss.get_as::<u32>(&["key"]), Some(2));
+        assert!(gss.allow_redefinition());
+
+        // Nested redefinition
+        let source_nested = r#"
+            obj = {
+                a = 10,
+                a = 20,
+            }
+        "#;
+        assert!(parse_str(source_nested).is_err());
+        let gss_nested = parse_str_with_options(source_nested, true).expect("Should allow nested redefinition");
+        assert_eq!(gss_nested.get_as::<u32>(&["obj", "a"]), Some(20));
+
+        // Builder & Setter
+        let mut obj = Object::new().with_allow_redefinition(true);
+        assert!(obj.allow_redefinition());
+        obj.set_allow_redefinition(false);
+        assert!(!obj.allow_redefinition());
     }
 }
