@@ -167,6 +167,36 @@ impl<T: FromGssValue> FromGssValue for Vec<T> {
     }
 }
 
+#[cfg(feature = "value-enum")]
+impl FromGssValue for Value {
+    fn from_gss_value(value: &Value) -> Option<Self> {
+        Some(value.clone())
+    }
+}
+
+#[cfg(not(feature = "value-enum"))]
+impl FromGssValue for Box<dyn std::any::Any + 'static> {
+    fn from_gss_value(value: &Value) -> Option<Self> {
+        if let Some(x) = value.downcast_ref::<u32>() {
+            Some(Box::new(*x))
+        } else if let Some(x) = value.downcast_ref::<f32>() {
+            Some(Box::new(*x))
+        } else if let Some(x) = value.downcast_ref::<bool>() {
+            Some(Box::new(*x))
+        } else if let Some(x) = value.downcast_ref::<String>() {
+            Some(Box::new(x.clone()))
+        } else if let Some(x) = value.downcast_ref::<Vec<Value>>() {
+            let mut new_vec = Vec::new();
+            for item in x {
+                new_vec.push(Value::from_gss_value(item)?);
+            }
+            Some(Box::new(new_vec))
+        } else {
+            None
+        }
+    }
+}
+
 #[derive(Debug)]
 #[cfg_attr(feature = "value-enum", derive(Clone, PartialEq))]
 pub struct Object {
@@ -1052,5 +1082,34 @@ mod tests {
         } else {
             panic!("Expected Value::Object");
         }
+    }
+
+    #[test]
+    fn test_vector_parsing_and_conversions() {
+        let source = r#"
+            ints = [1, 2, 3],
+            mixed = ["hello", true, 42.5],
+            nested = [[1, 2], [3, 4]],
+            empty = [],
+        "#;
+        let gss = parse_str(source).expect("Should parse vectors");
+
+        // Verify direct retrieval and conversion to Vec<T>
+        assert_eq!(gss.get_as::<Vec<u32>>(&["ints"]), Some(vec![1, 2, 3]));
+        assert_eq!(gss.get_as::<Vec<i32>>(&["ints"]), Some(vec![1, 2, 3]));
+        
+        // Verify nested lists
+        let nested = gss.get_as::<Vec<Vec<u32>>>(&["nested"]).unwrap();
+        assert_eq!(nested, vec![vec![1, 2], vec![3, 4]]);
+
+        // Empty vector
+        assert_eq!(gss.get_as::<Vec<u32>>(&["empty"]), Some(vec![]));
+        
+        // Mixed list types can be retrieved as Vec<Value>
+        let mixed = gss.get_as::<Vec<Value>>(&["mixed"]).unwrap();
+        assert_eq!(mixed.len(), 3);
+        assert_eq!(mixed[0].downcast_ref::<String>(), Some(&"hello".to_string()));
+        assert_eq!(mixed[1].downcast_ref::<bool>(), Some(&true));
+        assert_eq!(mixed[2].downcast_ref::<f32>(), Some(&42.5));
     }
 }
