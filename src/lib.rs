@@ -503,9 +503,9 @@ fn parse_value<'lex>(mut lex: RefLexer, allow_redefinition: bool) -> Parser<Valu
             };
             if lex.peek().kind == TokenKind::Mod {
                 lex.next();
-                return Parser::Success(lex, Box::new(x as f32 / 100.));
+                return Parser::Success(lex, new_float(x as f32 / 100.));
             }
-            Parser::Success(lex, Box::new(x))
+            Parser::Success(lex, new_number(x))
         }
         TokenKind::RealNumber => {
             let x = match t.source().parse::<f32>() {
@@ -514,16 +514,16 @@ fn parse_value<'lex>(mut lex: RefLexer, allow_redefinition: bool) -> Parser<Valu
             };
             if lex.peek().kind == TokenKind::Mod {
                 lex.next();
-                return Parser::Success(lex, Box::new(x as f32 / 100.));
+                return Parser::Success(lex, new_float(x as f32 / 100.));
             }
-            Parser::Success(lex, Box::new(x))
+            Parser::Success(lex, new_float(x))
         }
-        TokenKind::Identifier if t.source() == "true" => Parser::Success(lex, Box::new(true)),
-        TokenKind::Identifier if t.source() == "false" => Parser::Success(lex, Box::new(false)),
-        TokenKind::StringLiteral => Parser::Success(lex, Box::new(t.unescape())),
+        TokenKind::Identifier if t.source() == "true" => Parser::Success(lex, new_bool(true)),
+        TokenKind::Identifier if t.source() == "false" => Parser::Success(lex, new_bool(false)),
+        TokenKind::StringLiteral => Parser::Success(lex, new_string(t.unescape())),
         TokenKind::OpenCurly => {
             let object = try_parse!(lex, parse_object(lex, allow_redefinition));
-            Parser::Success(lex, Box::new(object))
+            Parser::Success(lex, new_object(object))
         }
         TokenKind::Identifier => {
             if lex.peek().kind == TokenKind::Dot {
@@ -534,9 +534,9 @@ fn parse_value<'lex>(mut lex: RefLexer, allow_redefinition: bool) -> Parser<Valu
                         .into_iter()
                         .map(|t| t.source.to_string()),
                 );
-                return Parser::Success(lex, Box::new(Expr::Access(seq)));
+                return Parser::Success(lex, new_expr(Expr::Access(seq)));
             }
-            Parser::Success(lex, Box::new(Expr::Symbol(t.source.to_string())))
+            Parser::Success(lex, new_expr(Expr::Symbol(t.source.to_string())))
         }
         TokenKind::Dot => {
             if lex.peek().kind == TokenKind::Identifier {
@@ -547,7 +547,7 @@ fn parse_value<'lex>(mut lex: RefLexer, allow_redefinition: bool) -> Parser<Valu
                         .into_iter()
                         .map(|t| t.source.to_string()),
                 );
-                return Parser::Success(lex, Box::new(Expr::RelAccess(seq)));
+                return Parser::Success(lex, new_expr(Expr::RelAccess(seq)));
             }
             Parser::Fail(lex, format!("Unexpect token `{t}`").into())
         }
