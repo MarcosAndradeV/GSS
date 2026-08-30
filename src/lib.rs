@@ -204,7 +204,55 @@ impl Object {
     pub fn allow_redefinition(&self) -> bool {
         self.allow_redefinition
     }
+}
 
+fn print_value_for_dump(v: &Value, level: usize) {
+    if let Some(string) = v.downcast_ref::<String>() {
+        print!("\"{}\"", string);
+    } else if let Some(i) = v.downcast_ref::<u32>() {
+        print!("{}", i);
+    } else if let Some(i) = v.downcast_ref::<f32>() {
+        print!("{}", i);
+    } else if let Some(b) = v.downcast_ref::<bool>() {
+        print!("{}", b);
+    } else if let Some(obj) = v.downcast_ref::<Object>() {
+        obj.dump(level + 1);
+    } else if let Some(expr) = v.downcast_ref::<Expr>() {
+        match expr {
+            Expr::Symbol(s) => print!("{s}"),
+            Expr::Access(seq) => {
+                for (i, s) in seq.iter().enumerate() {
+                    if i > 0 {
+                        print!(".");
+                    }
+                    print!("{s}");
+                }
+            }
+            Expr::RelAccess(seq) => {
+                print!(".");
+                for (i, s) in seq.iter().enumerate() {
+                    if i > 0 {
+                        print!(".");
+                    }
+                    print!("{s}");
+                }
+            }
+        }
+    } else if let Some(vec) = v.downcast_ref::<Vec<Value>>() {
+        print!("[");
+        for (i, val) in vec.iter().enumerate() {
+            if i > 0 {
+                print!(", ");
+            }
+            print_value_for_dump(val, level);
+        }
+        print!("]");
+    } else {
+        print!("UNKNOWN({:?})", std::any::Any::type_id(v));
+    }
+}
+
+impl Object {
     pub fn dump(&self, level: usize) {
         println!("{{");
 
@@ -214,43 +262,8 @@ impl Object {
             }
 
             print!("{k} => ");
-
-            if let Some(string) = v.downcast_ref::<String>() {
-                println!("\"{}\"", string);
-            } else if let Some(i) = v.downcast_ref::<u32>() {
-                println!("{}", i);
-            } else if let Some(i) = v.downcast_ref::<f32>() {
-                println!("{}", i);
-            } else if let Some(b) = v.downcast_ref::<bool>() {
-                println!("{}", b);
-            } else if let Some(obj) = v.downcast_ref::<Object>() {
-                obj.dump(level + 1);
-            } else if let Some(expr) = v.downcast_ref::<Expr>() {
-                match expr {
-                    Expr::Symbol(s) => println!("{s}"),
-                    Expr::Access(seq) => {
-                        for (i, s) in seq.iter().enumerate() {
-                            if i > 0 {
-                                print!(".");
-                            }
-                            print!("{s}");
-                        }
-                        println!()
-                    }
-                    Expr::RelAccess(seq) => {
-                        print!(".");
-                        for (i, s) in seq.iter().enumerate() {
-                            if i > 0 {
-                                print!(".");
-                            }
-                            print!("{s}");
-                        }
-                        println!()
-                    }
-                }
-            } else {
-                println!("UNKNOWN({:?})", v.type_id());
-            }
+            print_value_for_dump(v, level);
+            println!();
         }
 
         for _ in 0..level {
