@@ -186,6 +186,17 @@ pub fn load_gss_from_file<P: AsRef<Path>>(file_path: P) -> Result<Gss, Box<dyn S
     Ok(gss)
 }
 
+/// Parses a GSS string into a `Gss` style context.
+pub fn parse_str(source: &str) -> Result<Gss, Box<dyn StdError>> {
+    let mut lex = get_lexer(
+        source,
+        #[cfg(feature = "interning")]
+        "<input>",
+    );
+
+    parse("<input>", &mut lex)
+}
+
 fn get_lexer<#[cfg(feature = "interning")] P: AsRef<Path>>(
     source: &str,
     #[cfg(feature = "interning")] file_path: P,
@@ -286,7 +297,7 @@ fn parse_object<'lex>(mut lex: RefLexer) -> Parser<Object, Box<dyn StdError>> {
                 let v = try_parse!(lex, parse_value(lex));
                 Parser::Success(lex, (k, v))
             },
-            parse_comma
+            parse_maybe_comma
         )
     );
     try_parse!(lex, parse_close_curly(lex));
@@ -396,18 +407,16 @@ make_expect! {parse_close_curly, TokenKind::CloseCurly, "}" }
 make_expect! {parse_eof, TokenKind::EOF, "EOF" }
 make_expect! {ret, parse_ident, TokenKind::Identifier, "identifier" }
 
+fn parse_maybe_comma<'lex>(lex: RefLexer) -> Parser<(), Box<dyn StdError>> {
+    if lex.peek().kind == TokenKind::Comma {
+        return parse_comma(lex);
+    }
+    Parser::Success(lex, ())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn parse_str(source: &str) -> Result<Gss, Box<dyn std::error::Error>> {
-        let mut lex = get_lexer(
-            source,
-            #[cfg(feature = "interning")]
-            file!(),
-        );
-        parse("test_string", &mut lex)
-    }
 
     #[test]
     fn test_parse_success() {
@@ -461,7 +470,7 @@ mod tests {
             }
         "#;
         let result = parse_str(source);
-        assert!(result.is_err());
+        assert!(result.is_ok());
     }
 
     #[test]
@@ -645,6 +654,33 @@ mod tests {
         assert_eq!(
             gss.get_or_default::<String>(&["f", "g", "inner"]),
             "Hi".to_string()
+        );
+    }
+
+    #[test]
+    fn test_dot_separated_lookup() {
+        let source = r#"
+            a = {
+                b = {
+                    c = "found_it"
+                }
+                d = {
+                    e = a.b.c
+                }
+            }
+        "#;
+        let gss = parse_str(source).expect("Should parse");
+        assert_eq!(
+            gss.get::<String>(&["a", "b", "c"]),
+            Some(&"found_it".to_string())
+        );
+        assert_eq!(
+            gss.get::<String>(&["a", "b", "c"]),
+            Some(&"found_it".to_string())
+        );
+        assert_eq!(
+            gss.get::<String>(&["a", "d", "e"]),
+            Some(&"found_it".to_string())
         );
     }
 }
