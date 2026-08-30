@@ -158,6 +158,14 @@ impl FromGssValue for String {
         value.downcast_ref::<String>().cloned()
     }
 }
+impl<T: FromGssValue> FromGssValue for Vec<T> {
+    fn from_gss_value(value: &Value) -> Option<Self> {
+        value.downcast_ref::<Vec<Value>>()?
+            .iter()
+            .map(T::from_gss_value)
+            .collect()
+    }
+}
 
 #[derive(Debug)]
 #[cfg_attr(feature = "value-enum", derive(Clone, PartialEq))]
