@@ -20,6 +20,7 @@ pub enum Value {
     String(String),
     Object(Object),
     Expr(Expr),
+    Vec(Vec<Value>),
 }
 
 #[cfg(feature = "value-enum")]
@@ -32,6 +33,7 @@ impl Value {
             Value::String(x) => x,
             Value::Object(x) => x,
             Value::Expr(x) => x,
+            Value::Vec(x) => x,
         };
         any.downcast_ref::<T>()
     }
@@ -78,6 +80,13 @@ fn new_expr(x: Expr) -> Value {
     { Box::new(x) }
     #[cfg(feature = "value-enum")]
     { Value::Expr(x) }
+}
+
+fn new_vec(x: Vec<Value>) -> Value {
+    #[cfg(not(feature = "value-enum"))]
+    { Box::new(x) }
+    #[cfg(feature = "value-enum")]
+    { Value::Vec(x) }
 }
 pub type Percent = f32;
 pub type Gss = Object;
