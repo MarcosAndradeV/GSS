@@ -18,5 +18,5 @@ name = "gss_test"
 path = "src/bin/main.rs"
 
 [[bin]]
-name = "gss-check"
-path = "src/bin/gss-check.rs"
+name = "gss-fmt"
+path = "src/bin/gss-fmt.rs"

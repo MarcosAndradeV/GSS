@@ -235,71 +235,115 @@ impl Object {
     }
 }
 
-fn print_value_for_dump(v: &Value, level: usize) {
+impl std::fmt::Display for Expr {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Expr::Symbol(s) => write!(f, "{s}"),
+            Expr::Access(seq) => write!(f, "{}", seq.join(".")),
+            Expr::RelAccess(seq) => write!(f, ".{}", seq.join(".")),
+        }
+    }
+}
+
+fn escape_string(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push('"');
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            other => out.push(other),
+        }
+    }
+    out.push('"');
+    out
+}
+
+fn format_indent(level: usize) -> String {
+    "    ".repeat(level)
+}
+
+fn format_value(v: &Value, level: usize) -> String {
     if let Some(string) = v.downcast_ref::<String>() {
-        print!("\"{}\"", string);
+        escape_string(string)
     } else if let Some(i) = v.downcast_ref::<u32>() {
-        print!("{}", i);
-    } else if let Some(i) = v.downcast_ref::<f32>() {
-        print!("{}", i);
+        format!("{i}")
+    } else if let Some(f) = v.downcast_ref::<f32>() {
+        format!("{f}")
     } else if let Some(b) = v.downcast_ref::<bool>() {
-        print!("{}", b);
+        format!("{b}")
     } else if let Some(obj) = v.downcast_ref::<Object>() {
-        obj.dump(level + 1);
+        obj.format_with_level(level + 1)
     } else if let Some(expr) = v.downcast_ref::<Expr>() {
-        match expr {
-            Expr::Symbol(s) => print!("{s}"),
-            Expr::Access(seq) => {
-                for (i, s) in seq.iter().enumerate() {
-                    if i > 0 {
-                        print!(".");
-                    }
-                    print!("{s}");
-                }
-            }
-            Expr::RelAccess(seq) => {
-                print!(".");
-                for (i, s) in seq.iter().enumerate() {
-                    if i > 0 {
-                        print!(".");
-                    }
-                    print!("{s}");
-                }
-            }
-        }
+        format!("{expr}")
     } else if let Some(vec) = v.downcast_ref::<Vec<Value>>() {
-        print!("[");
-        for (i, val) in vec.iter().enumerate() {
-            if i > 0 {
-                print!(", ");
-            }
-            print_value_for_dump(val, level);
-        }
-        print!("]");
+        let items: Vec<String> = vec.iter().map(|item| format_value(item, level)).collect();
+        format!("[{}]", items.join(", "))
+    } else if let Some(i) = v.downcast_ref::<u64>() {
+        format!("{i}")
+    } else if let Some(i) = v.downcast_ref::<i64>() {
+        format!("{i}")
+    } else if let Some(i) = v.downcast_ref::<i32>() {
+        format!("{i}")
+    } else if let Some(f) = v.downcast_ref::<f64>() {
+        format!("{f}")
     } else {
-        print!("UNKNOWN({:?})", std::any::Any::type_id(v));
+        format!("UNKNOWN({:?})", std::any::Any::type_id(v))
+    }
+}
+
+impl std::fmt::Display for Object {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.format_with_level(0))
     }
 }
 
 impl Object {
-    pub fn dump(&self, level: usize) {
-        println!("{{");
+    pub fn format_with_level(&self, level: usize) -> String {
+        let mut keys: Vec<&String> = self.inner.keys().collect();
+        keys.sort();
 
-        for (k, v) in self.inner.iter() {
-            for _ in 0..=level {
-                print!("    ");
+        if level == 0 {
+            if keys.is_empty() {
+                return String::new();
             }
-
-            print!("{k} => ");
-            print_value_for_dump(v, level);
-            println!();
+            let mut out = String::new();
+            for k in keys {
+                let v = &self.inner[k];
+                let val_str = format_value(v, 0);
+                out.push_str(&format!("{k} = {val_str},\n"));
+            }
+            out
+        } else {
+            if keys.is_empty() {
+                return "{}".to_string();
+            }
+            let mut out = String::from("{\n");
+            let indent = format_indent(level);
+            for k in keys {
+                let v = &self.inner[k];
+                let val_str = format_value(v, level);
+                out.push_str(&format!("{indent}{k} = {val_str},\n"));
+            }
+            let closing_indent = format_indent(level.saturating_sub(1));
+            out.push_str(&format!("{closing_indent}}}"));
+            out
         }
+    }
 
-        for _ in 0..level {
-            print!("    ");
+    pub fn to_gss_string(&self) -> String {
+        self.format_with_level(0)
+    }
+
+    pub fn dump(&self, level: usize) {
+        if level == 0 {
+            print!("{}", self.format_with_level(0));
+        } else {
+            println!("{}", self.format_with_level(level));
         }
-
-        println!("}}");
     }
 
     pub fn get_fields(&self) -> std::collections::hash_map::Keys<'_, String, Value> {
@@ -430,6 +474,31 @@ pub fn parse_str_with_options(source: &str, allow_redefinition: bool) -> Result<
     );
 
     parse("<input>", &mut lex, allow_redefinition)
+}
+
+/// Formats a GSS source string into a canonical, cleanly indented GSS string.
+pub fn format_str(source: &str) -> Result<String, Box<dyn StdError>> {
+    format_str_with_options(source, false)
+}
+
+/// Formats a GSS source string with custom parser options into a canonical GSS string.
+pub fn format_str_with_options(source: &str, allow_redefinition: bool) -> Result<String, Box<dyn StdError>> {
+    let gss = parse_str_with_options(source, allow_redefinition)?;
+    Ok(gss.to_gss_string())
+}
+
+/// Formats a GSS file and returns the canonical formatted string.
+pub fn format_file<P: AsRef<Path>>(file_path: P) -> Result<String, Box<dyn StdError>> {
+    format_file_with_options(file_path, false)
+}
+
+/// Formats a GSS file with custom parser options and returns the canonical formatted string.
+pub fn format_file_with_options<P: AsRef<Path>>(
+    file_path: P,
+    allow_redefinition: bool,
+) -> Result<String, Box<dyn StdError>> {
+    let gss = load_gss_from_file_with_options(file_path, allow_redefinition)?;
+    Ok(gss.to_gss_string())
 }
 
 fn get_lexer<#[cfg(feature = "interning")] P: AsRef<Path>>(
@@ -1097,5 +1166,80 @@ mod tests {
         assert_eq!(mixed[0].downcast_ref::<String>(), Some(&"hello".to_string()));
         assert_eq!(mixed[1].downcast_ref::<bool>(), Some(&true));
         assert_eq!(mixed[2].downcast_ref::<f32>(), Some(&42.5));
+    }
+
+    #[test]
+    fn test_format_str_and_to_gss_string() {
+        let unformatted = r#"
+            z = 10,
+            a = {
+                nested_b = "line1\nline2",
+                nested_a = true
+            },
+            arr = [1, 2, 3]
+        "#;
+        let formatted = format_str(unformatted).expect("Should format successfully");
+        let expected = "a = {\n    nested_a = true,\n    nested_b = \"line1\\nline2\",\n},\narr = [1, 2, 3],\nz = 10,\n";
+        assert_eq!(formatted, expected);
+
+        // Verify reparsing formatted output yields identical values
+        let gss = parse_str(&formatted).expect("Formatted GSS must be valid");
+        assert_eq!(gss.get_as::<u32>(&["z"]), Some(10));
+        assert_eq!(gss.get_as::<bool>(&["a", "nested_a"]), Some(true));
+        assert_eq!(gss.get_as::<String>(&["a", "nested_b"]), Some("line1\nline2".to_string()));
+        assert_eq!(gss.get_as::<Vec<u32>>(&["arr"]), Some(vec![1, 2, 3]));
+        assert_eq!(gss.to_string(), expected);
+    }
+
+    #[test]
+    fn test_format_expressions() {
+        let source = r#"
+            a = 10,
+            b = a,
+            c = style.image.top,
+            d = .sibling,
+        "#;
+        let formatted = format_str(source).expect("Should format successfully");
+        let expected = "a = 10,\nb = a,\nc = style.image.top,\nd = .sibling,\n";
+        assert_eq!(formatted, expected);
+    }
+
+    #[test]
+    fn test_format_nested_objects_and_empty() {
+        let source = r#"
+            empty = {},
+            deep = {
+                l1 = {
+                    l2 = {
+                        val = 42,
+                    }
+                }
+            }
+        "#;
+        let formatted = format_str(source).expect("Should format successfully");
+        let expected = "deep = {\n    l1 = {\n        l2 = {\n            val = 42,\n        },\n    },\n},\nempty = {},\n";
+        assert_eq!(formatted, expected);
+    }
+
+    #[test]
+    fn test_dump_output() {
+        let source = r#"
+            name = "GSS",
+            count = 42,
+            sub = {
+                enabled = true,
+            },
+        "#;
+        let gss = parse_str(source).expect("Should parse");
+        // Level 0
+        assert_eq!(
+            gss.format_with_level(0),
+            "count = 42,\nname = \"GSS\",\nsub = {\n    enabled = true,\n},\n"
+        );
+        // Level 1
+        assert_eq!(
+            gss.format_with_level(1),
+            "{\n    count = 42,\n    name = \"GSS\",\n    sub = {\n        enabled = true,\n    },\n}"
+        );
     }
 }

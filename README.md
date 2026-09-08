@@ -251,8 +251,24 @@ for field in gss.get_fields() {
 }
 ```
 
+#### Formatting & String Representation
+Convert any `Object` / `Gss` to canonical formatted GSS:
+```rust
+let formatted_str = gss.to_gss_string();
+// Or using Display trait:
+println!("{gss}");
+```
+
+Format GSS source strings or files directly:
+```rust
+use gss::{format_str, format_file};
+
+let formatted = format_str("style={top=89%,count=69}")?;
+let from_file = format_file("tests/test.gss")?;
+```
+
 #### Dumping Structure
-Pretty-prints the parsed AST hierarchy to stdout:
+Pretty-prints the canonical parsed AST hierarchy to stdout:
 ```rust
 gss.dump(0);
 ```
@@ -340,15 +356,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ## CLI / Example Binary
 
-The repository includes a validation tool (`gss-check`) and a sample binary (`gss_test`):
+The repository includes a CLI tool (`gss-fmt`) and a sample binary (`gss_test`):
 
-### Checking Files (`gss-check`)
+### Formatting Files (`gss-fmt`)
 
+Format files and print to standard output:
 ```bash
-cargo run --bin gss-check -- path/to/file.gss
+cargo run --bin gss-fmt -- path/to/file.gss
 ```
 
-Returns exit code `0` if the file is valid, or exit code `1` and prints the error message if the file is invalid.
+Format files in-place:
+```bash
+cargo run --bin gss-fmt -- -w path/to/file.gss
+```
+
+Check if files are formatted (ideal for CI pipelines):
+```bash
+cargo run --bin gss-fmt -- -c path/to/file.gss
+```
 
 ### Sample Binary (`gss_test`)
 
@@ -356,7 +381,7 @@ Returns exit code `0` if the file is valid, or exit code `1` and prints the erro
 cargo run --bin gss_test
 ```
 
-This runs `src/bin/main.rs`, which parses `test/test3.gss` and pretty-prints the parsed hierarchy.
+This runs `src/bin/main.rs`, which parses `tests/test3.gss` and pretty-prints the parsed hierarchy.
 
 ---
 
@@ -410,16 +435,15 @@ This runs `src/bin/main.rs`, which parses `test/test3.gss` and pretty-prints the
 ├── README.md           # Project documentation
 ├── CHANGELOG.md        # Version history
 ├── src/
-│   ├── lib.rs          # Core library, parser, evaluation engine, and test suite
+│   ├── lib.rs          # Core library, parser, evaluation engine, formatter, and test suite
 │   └── bin/
-│       ├── gss-check.rs # CLI tool for validating GSS files
-│       └── main.rs     # Sample runnable binary (gss_test)
-├── test/
-│   ├── test.gss        # Sample stylesheet with primitives and percentages
-│   ├── test2.gss       # Sample stylesheet with absolute and relative references
-│   └── test3.gss       # Sample stylesheet with numeric literals (decimal, hex)
+│       ├── gss-fmt.rs    # CLI tool for validating and formatting GSS files
+│       └── main.rs       # Sample runnable binary (gss_test)
 └── tests/
-    └── test_gss_check.rs # Integration tests for gss-check
+    ├── test.gss          # Sample stylesheet with primitives and percentages
+    ├── test2.gss         # Sample stylesheet with absolute and relative references
+    ├── test3.gss         # Sample stylesheet with numeric literals (decimal, hex)
+    └── test_gss_fmt.rs   # Integration tests for gss-fmt
 ```
 
 ---
