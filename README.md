@@ -340,7 +340,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ## CLI / Example Binary
 
-The repository includes a sample binary (`gss_test`):
+The repository includes a validation tool (`gss-check`) and a sample binary (`gss_test`):
+
+### Checking Files (`gss-check`)
+
+```bash
+cargo run --bin gss-check -- path/to/file.gss
+```
+
+Returns exit code `0` if the file is valid, or exit code `1` and prints the error message if the file is invalid.
+
+### Sample Binary (`gss_test`)
 
 ```bash
 cargo run --bin gss_test
@@ -402,11 +412,14 @@ This runs `src/bin/main.rs`, which parses `test/test3.gss` and pretty-prints the
 ├── src/
 │   ├── lib.rs          # Core library, parser, evaluation engine, and test suite
 │   └── bin/
+│       ├── gss-check.rs # CLI tool for validating GSS files
 │       └── main.rs     # Sample runnable binary (gss_test)
-└── test/
-    ├── test.gss        # Sample stylesheet with primitives and percentages
-    ├── test2.gss       # Sample stylesheet with absolute and relative references
-    └── test3.gss       # Sample stylesheet with numeric literals (decimal, hex)
+├── test/
+│   ├── test.gss        # Sample stylesheet with primitives and percentages
+│   ├── test2.gss       # Sample stylesheet with absolute and relative references
+│   └── test3.gss       # Sample stylesheet with numeric literals (decimal, hex)
+└── tests/
+    └── test_gss_check.rs # Integration tests for gss-check
 ```
 
 ---

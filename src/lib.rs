@@ -830,7 +830,7 @@ mod tests {
 
     #[test]
     fn test_load_files() {
-        let gss1 = load_gss_from_file("test/test.gss").expect("Should load test.gss");
+        let gss1 = load_gss_from_file("tests/test.gss").expect("Should load test.gss");
         assert_eq!(gss1.get::<Percent>(&["style", "top"]), Some(&0.89));
         assert_eq!(gss1.get::<u32>(&["style", "count"]), Some(&69));
         assert_eq!(
@@ -838,12 +838,12 @@ mod tests {
             Some(&"google.com".to_string())
         );
 
-        let gss2 = load_gss_from_file("test/test2.gss").expect("Should load test2.gss");
+        let gss2 = load_gss_from_file("tests/test2.gss").expect("Should load test2.gss");
         assert_eq!(gss2.get::<u32>(&["style", "image1", "top"]), Some(&50));
         assert_eq!(gss2.get::<u32>(&["style", "image2", "top"]), Some(&50));
         assert_eq!(gss2.get::<u32>(&["style", "image2", "left"]), Some(&50));
 
-        let gss3 = load_gss_from_file("test/test3.gss").expect("Should load test3.gss");
+        let gss3 = load_gss_from_file("tests/test3.gss").expect("Should load test3.gss");
         assert_eq!(gss3.get::<u32>(&["test", "key"]), Some(&1));
         assert_eq!(gss3.get::<u32>(&["test", "other"]), Some(&2));
         assert_eq!(gss3.get::<u32>(&["test", "hex"]), Some(&0x32));
