@@ -501,6 +501,100 @@ pub fn format_file_with_options<P: AsRef<Path>>(
     Ok(gss.to_gss_string())
 }
 
+/// Parses a single GSS value from a string.
+pub fn parse_value_str(source: &str) -> Result<Value, Box<dyn StdError>> {
+    parse_value_str_with_options(source, false)
+}
+
+/// Parses a single GSS value from a string with custom parser options.
+pub fn parse_value_str_with_options(
+    source: &str,
+    allow_redefinition: bool,
+) -> Result<Value, Box<dyn StdError>> {
+    let mut lex = get_lexer(
+        source,
+        #[cfg(feature = "interning")]
+        "<input>",
+    );
+    parse_single_value_entry("<input>", &mut lex, allow_redefinition)
+}
+
+/// Loads and parses a single GSS value from a file.
+pub fn load_value_from_file<P: AsRef<Path>>(file_path: P) -> Result<Value, Box<dyn StdError>> {
+    load_value_from_file_with_options(file_path, false)
+}
+
+/// Loads and parses a single GSS value from a file with custom parser options.
+pub fn load_value_from_file_with_options<P: AsRef<Path>>(
+    file_path: P,
+    allow_redefinition: bool,
+) -> Result<Value, Box<dyn StdError>> {
+    let source = fs::read_to_string(file_path.as_ref())?;
+    let mut lex = get_lexer(
+        &source,
+        #[cfg(feature = "interning")]
+        &file_path,
+    );
+    parse_single_value_entry(file_path, &mut lex, allow_redefinition)
+}
+
+/// Formats a single GSS value source string into canonical formatted GSS.
+pub fn format_value_str(source: &str) -> Result<String, Box<dyn StdError>> {
+    format_value_str_with_options(source, false)
+}
+
+/// Formats a single GSS value source string with custom parser options into canonical formatted GSS.
+pub fn format_value_str_with_options(
+    source: &str,
+    allow_redefinition: bool,
+) -> Result<String, Box<dyn StdError>> {
+    let val = parse_value_str_with_options(source, allow_redefinition)?;
+    Ok(format_value(&val, 0))
+}
+
+/// Formats a single GSS value from a file and returns the canonical formatted string.
+pub fn format_value_file<P: AsRef<Path>>(file_path: P) -> Result<String, Box<dyn StdError>> {
+    format_value_file_with_options(file_path, false)
+}
+
+/// Formats a single GSS value from a file with custom parser options and returns the canonical formatted string.
+pub fn format_value_file_with_options<P: AsRef<Path>>(
+    file_path: P,
+    allow_redefinition: bool,
+) -> Result<String, Box<dyn StdError>> {
+    let val = load_value_from_file_with_options(file_path, allow_redefinition)?;
+    Ok(format_value(&val, 0))
+}
+
+fn parse_single_value_entry<'lex, P: AsRef<Path>>(
+    file_path: P,
+    lex: RefLexer<'lex>,
+    allow_redefinition: bool,
+) -> Result<Value, Box<dyn StdError>> {
+    match parse_single_value(lex, allow_redefinition) {
+        Parser::Success(_, val) => Ok(val),
+        Parser::Fail(lex, err) => Err(format!(
+            "{}:{}: {}",
+            file_path.as_ref().display(),
+            lex.peek().loc,
+            err
+        )
+        .into()),
+    }
+}
+
+fn parse_single_value<'lex>(
+    mut lex: RefLexer<'lex>,
+    allow_redefinition: bool,
+) -> Parser<'lex, Value, Box<dyn StdError>> {
+    let val = try_parse!(lex, parse_value(lex, allow_redefinition));
+    if lex.peek().kind == TokenKind::Comma {
+        lex.next();
+    }
+    try_parse!(lex, parse_eof(lex));
+    Parser::Success(lex, val)
+}
+
 fn get_lexer<#[cfg(feature = "interning")] P: AsRef<Path>>(
     source: &str,
     #[cfg(feature = "interning")] file_path: P,
@@ -556,15 +650,7 @@ fn parse_gss<'lex>(mut lex: RefLexer, allow_redefinition: bool) -> Parser<Gss, B
     Parser::Success(lex, object)
 }
 
-#[cfg(feature = "internal-api")]
-pub fn internal_parse_object_from_str<'lex>(s: &str) -> Result<Object, Box<dyn StdError>> {
-    let mut lex = get_lexer(
-        s,
-        #[cfg(feature = "interning")]
-        "<object_from_str>",
-    );
-    parse_object(&mut lex, false).success().map_err(|(_, err)| err)
-}
+
 
 fn parse_object<'lex>(mut lex: RefLexer, allow_redefinition: bool) -> Parser<Object, Box<dyn StdError>> {
     let mut object = Object::new();
@@ -623,15 +709,7 @@ fn parse_list<'lex>(mut lex: RefLexer, allow_redefinition: bool) -> Parser<Vec<V
 }
 
 
-#[cfg(feature = "internal-api")]
-pub fn internal_parse_value_from_str<'lex>(s: &str) -> Result<Value, Box<dyn StdError>> {
-    let mut lex = get_lexer(
-        s,
-        #[cfg(feature = "interning")]
-        "<value_from_str>",
-    );
-    parse_value(&mut lex, false).success().map_err(|(_, err)| err)
-}
+
 
 fn parse_value<'lex>(mut lex: RefLexer, allow_redefinition: bool) -> Parser<Value, Box<dyn StdError>> {
     if lex.peek().kind == TokenKind::OpenBracket {
@@ -1241,5 +1319,33 @@ mod tests {
             gss.format_with_level(1),
             "{\n    count = 42,\n    name = \"GSS\",\n    sub = {\n        enabled = true,\n    },\n}"
         );
+    }
+
+    #[test]
+    fn test_single_value_parsing_and_formatting() {
+        // Scalar values
+        let num_val = parse_value_str("42").expect("Should parse number");
+        assert_eq!(num_val.downcast_ref::<u32>(), Some(&42));
+        assert_eq!(format_value_str("42").unwrap(), "42");
+
+        let str_val = parse_value_str("\"hello world\"").expect("Should parse string");
+        assert_eq!(str_val.downcast_ref::<String>(), Some(&"hello world".to_string()));
+        assert_eq!(format_value_str("\"hello world\"").unwrap(), "\"hello world\"");
+
+        let bool_val = parse_value_str("true,").expect("Should parse bool with optional comma");
+        assert_eq!(bool_val.downcast_ref::<bool>(), Some(&true));
+
+        // Array value
+        let list_val = parse_value_str("[1, 2, 3]").expect("Should parse array");
+        assert!(list_val.downcast_ref::<Vec<Value>>().is_some());
+        assert_eq!(format_value_str("[1, 2, 3]").unwrap(), "[1, 2, 3]");
+
+        // Object value
+        let obj_val = parse_value_str("{ a = 1 }").expect("Should parse object value");
+        assert!(obj_val.downcast_ref::<Object>().is_some());
+        assert_eq!(format_value_str("{ a = 1 }").unwrap(), "{\n    a = 1,\n}");
+
+        // Invalid trailing syntax check
+        assert!(parse_value_str("42 extra").is_err());
     }
 }

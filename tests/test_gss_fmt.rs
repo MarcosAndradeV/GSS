@@ -18,6 +18,7 @@ fn test_fmt_stdout_valid_file() {
 fn test_fmt_check_already_formatted_file() {
     let temp_path = "temp/test_fmt_already_formatted.gss";
     let formatted_content = "test = {\n    hex = 50,\n    key = 1,\n    other = 2,\n},\n";
+    let _ = fs::create_dir_all("temp");
     fs::write(temp_path, formatted_content).expect("failed to create temp file");
 
     let output = Command::new(env!("CARGO_BIN_EXE_gss-fmt"))
@@ -35,6 +36,7 @@ fn test_fmt_check_already_formatted_file() {
 fn test_fmt_check_unformatted_file() {
     let temp_path = "temp/test_fmt_unformatted.gss";
     let unformatted_content = "test={other=2,key=1,hex=0x32}";
+    let _ = fs::create_dir_all("temp");
     fs::write(temp_path, unformatted_content).expect("failed to create temp file");
 
     let output = Command::new(env!("CARGO_BIN_EXE_gss-fmt"))
@@ -53,6 +55,7 @@ fn test_fmt_check_unformatted_file() {
 fn test_fmt_write_in_place() {
     let temp_path = "temp/test_fmt_write.gss";
     let unformatted_content = "a={b=1,c=2}\nz=99";
+    let _ = fs::create_dir_all("temp");
     fs::write(temp_path, unformatted_content).expect("failed to create temp file");
 
     let output = Command::new(env!("CARGO_BIN_EXE_gss-fmt"))
@@ -73,6 +76,7 @@ fn test_fmt_write_in_place() {
 #[test]
 fn test_fmt_syntax_error() {
     let temp_path = "temp/test_fmt_syntax_err.gss";
+    let _ = fs::create_dir_all("temp");
     fs::write(temp_path, "invalid syntax here").expect("failed to create temp file");
 
     let output = Command::new(env!("CARGO_BIN_EXE_gss-fmt"))

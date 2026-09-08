@@ -153,7 +153,10 @@ chained2 = chained1,  // Resolves to 42
 ### Loading & Parsing
 
 ```rust
-use gss::{load_gss_from_file, parse_str, parse_str_with_options, Gss};
+use gss::{
+    load_gss_from_file, parse_str, parse_str_with_options,
+    parse_value_str, load_value_from_file, format_value_str, Value, Gss
+};
 use std::error::Error;
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -170,6 +173,11 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     // 3. Or load from a file
     let gss_from_file: Gss = load_gss_from_file("config.gss")?;
+
+    // 4. Parse or format single GSS values from string or file
+    let val: Value = parse_value_str("42")?;
+    let formatted_val: String = format_value_str("[1, 2, 3]")?;
+    let val_from_file: Value = load_value_from_file("single_val.gss")?;
 
     Ok(())
 }
@@ -293,7 +301,7 @@ gss.dump(0);
 | Feature | Description |
 | :--- | :--- |
 | `interning` | Enables string interning in the underlying lexer via `lex-just-parse/interning`. |
-| `internal-api` | Exposes internal parsing functions (`internal_parse`, `internal_parse_gss`, `internal_parse_object`, `internal_parse_value`, `internal_parse_object_from_str`) for extending or benchmarking the parser. |
+| `value-enum` | Enables full enum representation for `Value`. |
 
 Enable features in `Cargo.toml`:
 
