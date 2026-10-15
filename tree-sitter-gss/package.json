@@ -1,0 +1,22 @@
+{
+  "name": "tree-sitter-gss",
+  "version": "0.1.0",
+  "description": "GSS (Graph Style Sheets) grammar for tree-sitter",
+  "main": "bindings/node",
+  "keywords": [
+    "parser",
+    "lexer",
+    "gss"
+  ],
+  "author": "MarcosAndradeV",
+  "license": "MIT",
+  "tree-sitter": [
+    {
+      "scope": "source.gss",
+      "file-types": [
+        "gss"
+      ],
+      "injection-regex": "^gss$"
+    }
+  ]
+}

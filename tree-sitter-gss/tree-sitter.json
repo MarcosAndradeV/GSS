@@ -1,0 +1,44 @@
+{
+  "$schema": "https://tree-sitter.github.io/tree-sitter/assets/schemas/config.schema.json",
+  "grammars": [
+    {
+      "name": "gss",
+      "camelcase": "Gss",
+      "scope": "source.gss",
+      "path": ".",
+      "file-types": [
+        "gss"
+      ],
+      "highlights": [
+        "queries/highlights.scm"
+      ],
+      "brackets": [
+        "queries/brackets.scm"
+      ],
+      "indents": [
+        "queries/indents.scm"
+      ]
+    }
+  ],
+  "metadata": {
+    "version": "0.1.0",
+    "license": "MIT",
+    "description": "GSS (Graph Style Sheets) grammar for tree-sitter",
+    "authors": [
+      {
+        "name": "MarcosAndradeV"
+      }
+    ],
+    "links": {
+      "repository": "https://github.com/MarcosAndradeV/gss"
+    }
+  },
+  "bindings": {
+    "c": true,
+    "go": false,
+    "node": true,
+    "python": false,
+    "rust": true,
+    "swift": false
+  }
+}

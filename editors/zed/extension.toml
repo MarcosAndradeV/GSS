@@ -1,0 +1,16 @@
+id = "gss"
+name = "GSS"
+version = "0.1.0"
+schema_version = 1
+authors = ["MarcosAndradeV"]
+description = "Zed editor support for Graph Style Sheets (GSS)"
+repository = "https://github.com/MarcosAndradeV/gss"
+
+[grammars.gss]
+repository = "https://github.com/MarcosAndradeV/gss"
+rev = "HEAD"
+subpath = "tree-sitter-gss"
+
+[language_servers.gss-lsp]
+name = "gss-lsp"
+languages = ["GSS"]
