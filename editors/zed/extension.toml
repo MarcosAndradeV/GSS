@@ -8,8 +8,8 @@ repository = "https://github.com/MarcosAndradeV/gss"
 
 [grammars.gss]
 repository = "https://github.com/MarcosAndradeV/gss"
-rev = "HEAD"
-subpath = "tree-sitter-gss"
+rev = "bd62113dfe582aafe6933b46743b7f2c67b51633"
+path = "tree-sitter-gss"
 
 [language_servers.gss-lsp]
 name = "gss-lsp"
