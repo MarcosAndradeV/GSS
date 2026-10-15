@@ -1,8 +1,14 @@
 use std::env;
 use std::fs;
-use std::io::{self, IsTerminal, Read};
+use std::io::{self, IsTerminal, Read, Write};
 use std::path::Path;
 use std::process;
+
+fn write_stdout(text: &str) {
+    let stdout = io::stdout();
+    let mut handle = io::BufWriter::new(stdout.lock());
+    let _ = handle.write_all(text.as_bytes());
+}
 
 fn print_usage() {
     println!(
@@ -32,7 +38,7 @@ pub fn run() {
             }
             match gss::format_str(&buffer) {
                 Ok(formatted) => {
-                    print!("{formatted}");
+                    write_stdout(&formatted);
                     process::exit(0);
                 }
                 Err(err) => {
@@ -105,7 +111,7 @@ pub fn run() {
                             unformatted_files.push("<stdin>".to_string());
                         }
                     } else {
-                        print!("{formatted}");
+                        write_stdout(&formatted);
                     }
                 }
                 Err(err) => {
@@ -140,7 +146,7 @@ pub fn run() {
                         }
                     }
                 } else {
-                    print!("{formatted}");
+                    write_stdout(&formatted);
                 }
             }
             Err(err) => {

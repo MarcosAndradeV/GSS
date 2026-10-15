@@ -245,8 +245,8 @@ impl std::fmt::Display for Expr {
     }
 }
 
-fn escape_string(s: &str) -> String {
-    let mut out = String::with_capacity(s.len() + 2);
+fn escape_string_into(s: &str, out: &mut String) {
+    out.reserve(s.len() + 2);
     out.push('"');
     for c in s.chars() {
         match c {
@@ -259,40 +259,122 @@ fn escape_string(s: &str) -> String {
         }
     }
     out.push('"');
-    out
 }
 
-fn format_indent(level: usize) -> String {
-    "    ".repeat(level)
+#[inline]
+fn write_indent(level: usize, out: &mut String) {
+    for _ in 0..level {
+        out.push_str("    ");
+    }
+}
+
+fn format_vec_into(vec: &[Value], level: usize, out: &mut String) {
+    out.push('[');
+    for (i, item) in vec.iter().enumerate() {
+        if i > 0 {
+            out.push_str(", ");
+        }
+        format_value_into(item, level, out);
+    }
+    out.push(']');
+}
+
+fn format_object_into(obj: &Object, level: usize, out: &mut String) {
+    if obj.inner.is_empty() {
+        if level > 0 {
+            out.push_str("{}");
+        }
+        return;
+    }
+
+    let mut entries: Vec<(&str, &Value)> = obj
+        .inner
+        .iter()
+        .map(|(k, v)| (k.as_str(), v))
+        .collect();
+    entries.sort_unstable_by_key(|&(k, _)| k);
+
+    if level == 0 {
+        for (k, v) in entries {
+            out.push_str(k);
+            out.push_str(" = ");
+            format_value_into(v, 0, out);
+            out.push_str(",\n");
+        }
+    } else {
+        out.push_str("{\n");
+        for (k, v) in entries {
+            write_indent(level, out);
+            out.push_str(k);
+            out.push_str(" = ");
+            format_value_into(v, level, out);
+            out.push_str(",\n");
+        }
+        write_indent(level.saturating_sub(1), out);
+        out.push('}');
+    }
+}
+
+fn format_value_into(v: &Value, level: usize, out: &mut String) {
+    use std::fmt::Write;
+
+    #[cfg(feature = "value-enum")]
+    match v {
+        Value::String(string) => escape_string_into(string, out),
+        Value::Number(i) => {
+            let _ = write!(out, "{i}");
+        }
+        Value::Float(f) => {
+            let _ = write!(out, "{f}");
+        }
+        Value::Bool(b) => {
+            let _ = write!(out, "{b}");
+        }
+        Value::Object(obj) => {
+            format_object_into(obj, level + 1, out);
+        }
+        Value::Expr(expr) => {
+            let _ = write!(out, "{expr}");
+        }
+        Value::Vec(vec) => {
+            format_vec_into(vec, level, out);
+        }
+    }
+
+    #[cfg(not(feature = "value-enum"))]
+    {
+        if let Some(string) = v.downcast_ref::<String>() {
+            escape_string_into(string, out);
+        } else if let Some(i) = v.downcast_ref::<u32>() {
+            let _ = write!(out, "{i}");
+        } else if let Some(f) = v.downcast_ref::<f32>() {
+            let _ = write!(out, "{f}");
+        } else if let Some(b) = v.downcast_ref::<bool>() {
+            let _ = write!(out, "{b}");
+        } else if let Some(obj) = v.downcast_ref::<Object>() {
+            format_object_into(obj, level + 1, out);
+        } else if let Some(expr) = v.downcast_ref::<Expr>() {
+            let _ = write!(out, "{expr}");
+        } else if let Some(vec) = v.downcast_ref::<Vec<Value>>() {
+            format_vec_into(vec, level, out);
+        } else if let Some(i) = v.downcast_ref::<u64>() {
+            let _ = write!(out, "{i}");
+        } else if let Some(i) = v.downcast_ref::<i64>() {
+            let _ = write!(out, "{i}");
+        } else if let Some(i) = v.downcast_ref::<i32>() {
+            let _ = write!(out, "{i}");
+        } else if let Some(f) = v.downcast_ref::<f64>() {
+            let _ = write!(out, "{f}");
+        } else {
+            let _ = write!(out, "UNKNOWN({:?})", std::any::Any::type_id(v));
+        }
+    }
 }
 
 fn format_value(v: &Value, level: usize) -> String {
-    if let Some(string) = v.downcast_ref::<String>() {
-        escape_string(string)
-    } else if let Some(i) = v.downcast_ref::<u32>() {
-        format!("{i}")
-    } else if let Some(f) = v.downcast_ref::<f32>() {
-        format!("{f}")
-    } else if let Some(b) = v.downcast_ref::<bool>() {
-        format!("{b}")
-    } else if let Some(obj) = v.downcast_ref::<Object>() {
-        obj.format_with_level(level + 1)
-    } else if let Some(expr) = v.downcast_ref::<Expr>() {
-        format!("{expr}")
-    } else if let Some(vec) = v.downcast_ref::<Vec<Value>>() {
-        let items: Vec<String> = vec.iter().map(|item| format_value(item, level)).collect();
-        format!("[{}]", items.join(", "))
-    } else if let Some(i) = v.downcast_ref::<u64>() {
-        format!("{i}")
-    } else if let Some(i) = v.downcast_ref::<i64>() {
-        format!("{i}")
-    } else if let Some(i) = v.downcast_ref::<i32>() {
-        format!("{i}")
-    } else if let Some(f) = v.downcast_ref::<f64>() {
-        format!("{f}")
-    } else {
-        format!("UNKNOWN({:?})", std::any::Any::type_id(v))
-    }
+    let mut out = String::new();
+    format_value_into(v, level, &mut out);
+    out
 }
 
 impl std::fmt::Display for Object {
@@ -301,37 +383,25 @@ impl std::fmt::Display for Object {
     }
 }
 
+#[inline]
+fn with_str_slice<R>(seq: &[String], f: impl FnOnce(&[&str]) -> R) -> R {
+    if seq.len() <= 8 {
+        let mut buf = [""; 8];
+        for (i, s) in seq.iter().enumerate() {
+            buf[i] = s.as_str();
+        }
+        f(&buf[..seq.len()])
+    } else {
+        let tmp: Vec<&str> = seq.iter().map(AsRef::as_ref).collect();
+        f(&tmp)
+    }
+}
+
 impl Object {
     pub fn format_with_level(&self, level: usize) -> String {
-        let mut keys: Vec<&String> = self.inner.keys().collect();
-        keys.sort();
-
-        if level == 0 {
-            if keys.is_empty() {
-                return String::new();
-            }
-            let mut out = String::new();
-            for k in keys {
-                let v = &self.inner[k];
-                let val_str = format_value(v, 0);
-                out.push_str(&format!("{k} = {val_str},\n"));
-            }
-            out
-        } else {
-            if keys.is_empty() {
-                return "{}".to_string();
-            }
-            let mut out = String::from("{\n");
-            let indent = format_indent(level);
-            for k in keys {
-                let v = &self.inner[k];
-                let val_str = format_value(v, level);
-                out.push_str(&format!("{indent}{k} = {val_str},\n"));
-            }
-            let closing_indent = format_indent(level.saturating_sub(1));
-            out.push_str(&format!("{closing_indent}}}"));
-            out
-        }
+        let mut out = String::with_capacity(self.inner.len() * 32);
+        format_object_into(self, level, &mut out);
+        out
     }
 
     pub fn to_gss_string(&self) -> String {
@@ -394,13 +464,15 @@ impl Object {
                                 val.downcast_ref::<Object>()?
                             }
                             Expr::Access(seq) => {
-                                let tmp: Vec<&str> = seq.iter().map(AsRef::as_ref).collect();
-                                let val = self.get_value_impl(&tmp, current_depth + 1, max_depth)?;
+                                let val = with_str_slice(seq, |tmp| {
+                                    self.get_value_impl(tmp, current_depth + 1, max_depth)
+                                })?;
                                 val.downcast_ref::<Object>()?
                             }
                             Expr::RelAccess(seq) => {
-                                let tmp: Vec<&str> = seq.iter().map(AsRef::as_ref).collect();
-                                let val = obj.get_value_impl(&tmp, current_depth + 1, max_depth)?;
+                                let val = with_str_slice(seq, |tmp| {
+                                    obj.get_value_impl(tmp, current_depth + 1, max_depth)
+                                })?;
                                 val.downcast_ref::<Object>()?
                             }
                         };
@@ -419,12 +491,14 @@ impl Object {
                             self.get_value_impl(&[s.as_str()], current_depth + 1, max_depth)
                         }
                         Expr::Access(seq) => {
-                            let tmp: Vec<&str> = seq.iter().map(AsRef::as_ref).collect();
-                            self.get_value_impl(&tmp, current_depth + 1, max_depth)
+                            with_str_slice(seq, |tmp| {
+                                self.get_value_impl(tmp, current_depth + 1, max_depth)
+                            })
                         }
                         Expr::RelAccess(seq) => {
-                            let tmp: Vec<&str> = seq.iter().map(AsRef::as_ref).collect();
-                            obj.get_value_impl(&tmp, current_depth + 1, max_depth)
+                            with_str_slice(seq, |tmp| {
+                                obj.get_value_impl(tmp, current_depth + 1, max_depth)
+                            })
                         }
                     };
                 }
@@ -642,8 +716,10 @@ fn parse_gss<'lex>(mut lex: RefLexer, allow_redefinition: bool) -> Parser<Gss, B
         })
     );
     try_parse!(lex, parse_eof(lex));
+    object.inner.reserve(fields.len());
     for (key, value) in fields {
-        if object.inner.insert(key.to_string(), value).is_some() && !allow_redefinition {
+        let key_str = key.source().to_string();
+        if object.inner.insert(key_str, value).is_some() && !allow_redefinition {
             return Parser::Fail(lex, format!("Redefinition of key {key}").into());
         }
     }
@@ -676,8 +752,10 @@ fn parse_object<'lex>(mut lex: RefLexer, allow_redefinition: bool) -> Parser<Obj
         )
     );
     try_parse!(lex, parse_close_curly(lex));
+    object.inner.reserve(fields.len());
     for (key, value) in fields {
-        if object.inner.insert(key.to_string(), value).is_some() && !allow_redefinition {
+        let key_str = key.source().to_string();
+        if object.inner.insert(key_str, value).is_some() && !allow_redefinition {
             return Parser::Fail(lex, format!("Redefinition of key {key}").into());
         }
     }
@@ -754,24 +832,24 @@ fn parse_value<'lex>(mut lex: RefLexer, allow_redefinition: bool) -> Parser<Valu
         TokenKind::Identifier => {
             if lex.peek().kind == TokenKind::Dot {
                 lex.next();
-                let mut seq = vec![t.source.to_string()];
+                let mut seq = vec![t.source().to_string()];
                 seq.extend(
                     try_parse!(lex, sep_by(lex, parse_ident, parse_dot))
                         .into_iter()
-                        .map(|t| t.source.to_string()),
+                        .map(|t| t.source().to_string()),
                 );
                 return Parser::Success(lex, new_expr(Expr::Access(seq)));
             }
-            Parser::Success(lex, new_expr(Expr::Symbol(t.source.to_string())))
+            Parser::Success(lex, new_expr(Expr::Symbol(t.source().to_string())))
         }
         TokenKind::Dot => {
             if lex.peek().kind == TokenKind::Identifier {
                 let t = lex.next();
-                let mut seq = vec![t.source.to_string()];
+                let mut seq = vec![t.source().to_string()];
                 seq.extend(
                     try_parse!(lex, sep_by(lex, parse_ident, parse_dot))
                         .into_iter()
-                        .map(|t| t.source.to_string()),
+                        .map(|t| t.source().to_string()),
                 );
                 return Parser::Success(lex, new_expr(Expr::RelAccess(seq)));
             }
