@@ -1,5 +1,5 @@
 test = {
+    hex = 50,
     key = 1,
     other = 2,
-    hex = 0x32,
-}
+},

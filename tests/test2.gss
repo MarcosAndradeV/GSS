@@ -1,11 +1,11 @@
 style = {
     image1 = {
-        top = 50,
         left = 50,
+        top = 50,
     },
     image2 = {
-        top = style.image1.top,
         left = style.image1.left,
+        top = style.image1.top,
     },
     image3 = {
         left = 50,
