@@ -14,6 +14,7 @@ pub type Value = Box<dyn std::any::Any + 'static>;
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
     Number(u32),
+    SignedNumber(i32),
     Float(f32),
     Bool(bool),
     String(String),
@@ -27,6 +28,7 @@ impl Value {
     pub fn downcast_ref<T: 'static>(&self) -> Option<&T> {
         let any: &dyn std::any::Any = match self {
             Value::Number(x) => x,
+            Value::SignedNumber(x) => x,
             Value::Float(x) => x,
             Value::Bool(x) => x,
             Value::String(x) => x,
@@ -44,6 +46,13 @@ fn new_number(x: u32) -> Value {
     { Box::new(x) }
     #[cfg(feature = "value-enum")]
     { Value::Number(x) }
+}
+
+fn new_signed_number(x: i32) -> Value {
+    #[cfg(not(feature = "value-enum"))]
+    { Box::new(x) }
+    #[cfg(feature = "value-enum")]
+    { Value::SignedNumber(x) }
 }
 
 fn new_float(x: f32) -> Value {
@@ -101,6 +110,8 @@ macro_rules! impl_from_gss_for_int {
                 fn from_gss_value(value: &Value) -> Option<Self> {
                     if let Some(x) = value.downcast_ref::<u32>() {
                         <$t>::try_from(*x).ok()
+                    } else if let Some(x) = value.downcast_ref::<i32>() {
+                        <$t>::try_from(*x).ok()
                     } else if let Some(x) = value.downcast_ref::<f32>() {
                         if x.fract() == 0.0 && *x >= (<$t>::MIN as f32) && *x <= (<$t>::MAX as f32) {
                             Some(*x as $t)
@@ -126,6 +137,8 @@ impl FromGssValue for f32 {
             Some(*x)
         } else if let Some(x) = value.downcast_ref::<u32>() {
             Some(*x as f32)
+        } else if let Some(x) = value.downcast_ref::<i32>() {
+            Some(*x as f32)
         } else {
             None
         }
@@ -137,6 +150,8 @@ impl FromGssValue for f64 {
         if let Some(x) = value.downcast_ref::<f32>() {
             Some(*x as f64)
         } else if let Some(x) = value.downcast_ref::<u32>() {
+            Some(*x as f64)
+        } else if let Some(x) = value.downcast_ref::<i32>() {
             Some(*x as f64)
         } else if let Some(x) = value.downcast_ref::<f64>() {
             Some(*x)
@@ -177,6 +192,8 @@ impl FromGssValue for Value {
 impl FromGssValue for Box<dyn std::any::Any + 'static> {
     fn from_gss_value(value: &Value) -> Option<Self> {
         if let Some(x) = value.downcast_ref::<u32>() {
+            Some(Box::new(*x))
+        } else if let Some(x) = value.downcast_ref::<i32>() {
             Some(Box::new(*x))
         } else if let Some(x) = value.downcast_ref::<f32>() {
             Some(Box::new(*x))
@@ -322,6 +339,9 @@ fn format_value_into(v: &Value, level: usize, out: &mut String) {
     match v {
         Value::String(string) => escape_string_into(string, out),
         Value::Number(i) => {
+            let _ = write!(out, "{i}");
+        }
+        Value::SignedNumber(i) => {
             let _ = write!(out, "{i}");
         }
         Value::Float(f) => {
@@ -817,6 +837,66 @@ fn parse_value<'lex>(mut lex: RefLexer, allow_redefinition: bool) -> Parser<Valu
                 return Parser::Success(lex, new_float(x as f32 / 100.));
             }
             Parser::Success(lex, new_float(x))
+        }
+        TokenKind::Minus => {
+            let next_tok = lex.next();
+            match next_tok.kind {
+                TokenKind::Number(base) => {
+                    let mag = match i64::from_str_radix(next_tok.source(), base.radix()) {
+                        Ok(x) => x,
+                        Err(err) => return Parser::Fail(lex, err.into()),
+                    };
+                    if lex.peek().kind == TokenKind::Mod {
+                        lex.next();
+                        return Parser::Success(lex, new_float(-(mag as f32) / 100.));
+                    }
+                    let val = match i32::try_from(-mag) {
+                        Ok(v) => v,
+                        Err(err) => return Parser::Fail(lex, err.into()),
+                    };
+                    Parser::Success(lex, new_signed_number(val))
+                }
+                TokenKind::RealNumber => {
+                    let x = match next_tok.source().parse::<f32>() {
+                        Ok(x) => -x,
+                        Err(err) => return Parser::Fail(lex, err.into()),
+                    };
+                    if lex.peek().kind == TokenKind::Mod {
+                        lex.next();
+                        return Parser::Success(lex, new_float(x / 100.));
+                    }
+                    Parser::Success(lex, new_float(x))
+                }
+                _ => Parser::Fail(lex, format!("Unexpect token `{next_tok}`").into()),
+            }
+        }
+        TokenKind::Plus => {
+            let next_tok = lex.next();
+            match next_tok.kind {
+                TokenKind::Number(base) => {
+                    let x = match u32::from_str_radix(next_tok.source(), base.radix()) {
+                        Ok(x) => x,
+                        Err(err) => return Parser::Fail(lex, err.into()),
+                    };
+                    if lex.peek().kind == TokenKind::Mod {
+                        lex.next();
+                        return Parser::Success(lex, new_float(x as f32 / 100.));
+                    }
+                    Parser::Success(lex, new_number(x))
+                }
+                TokenKind::RealNumber => {
+                    let x = match next_tok.source().parse::<f32>() {
+                        Ok(x) => x,
+                        Err(err) => return Parser::Fail(lex, err.into()),
+                    };
+                    if lex.peek().kind == TokenKind::Mod {
+                        lex.next();
+                        return Parser::Success(lex, new_float(x / 100.));
+                    }
+                    Parser::Success(lex, new_float(x))
+                }
+                _ => Parser::Fail(lex, format!("Unexpect token `{next_tok}`").into()),
+            }
         }
         TokenKind::Identifier if t.source() == "true" => Parser::Success(lex, new_bool(true)),
         TokenKind::Identifier if t.source() == "false" => Parser::Success(lex, new_bool(false)),
@@ -1426,4 +1506,55 @@ mod tests {
         // Invalid trailing syntax check
         assert!(parse_value_str("42 extra").is_err());
     }
+
+    #[test]
+    fn test_signed_numbers() {
+        let source = r#"
+            neg_int = -42,
+            pos_int = +42,
+            neg_hex = -0x32,
+            pos_hex = +0x32,
+            min_i32 = -2147483648,
+            neg_float = -3.14,
+            pos_float = +3.14,
+            neg_percent = -50%,
+            pos_percent = +50%,
+            neg_float_percent = -12.5%,
+            signed_list = [-10, 0, +10, -20],
+        "#;
+        let gss = parse_str(source).expect("Should parse signed numbers");
+
+        // Direct get
+        assert_eq!(gss.get::<i32>(&["neg_int"]), Some(&-42));
+        assert_eq!(gss.get::<u32>(&["pos_int"]), Some(&42));
+        assert_eq!(gss.get::<i32>(&["neg_hex"]), Some(&-50));
+        assert_eq!(gss.get::<u32>(&["pos_hex"]), Some(&50));
+        assert_eq!(gss.get::<i32>(&["min_i32"]), Some(&i32::MIN));
+        assert_eq!(gss.get::<f32>(&["neg_float"]), Some(&-3.14));
+        assert_eq!(gss.get::<f32>(&["pos_float"]), Some(&3.14));
+        assert_eq!(gss.get::<f32>(&["neg_percent"]), Some(&-0.5));
+        assert_eq!(gss.get::<f32>(&["pos_percent"]), Some(&0.5));
+        assert_eq!(gss.get::<f32>(&["neg_float_percent"]), Some(&-0.125));
+
+        // get_as conversions
+        assert_eq!(gss.get_as::<i8>(&["neg_int"]), Some(-42));
+        assert_eq!(gss.get_as::<i16>(&["neg_int"]), Some(-42));
+        assert_eq!(gss.get_as::<i64>(&["neg_int"]), Some(-42));
+        assert_eq!(gss.get_as::<isize>(&["neg_int"]), Some(-42));
+        assert_eq!(gss.get_as::<u32>(&["neg_int"]), None); // Negative cannot convert to unsigned
+        assert_eq!(gss.get_as::<i32>(&["pos_int"]), Some(42));
+        assert_eq!(gss.get_as::<f32>(&["neg_int"]), Some(-42.0));
+        assert_eq!(gss.get_as::<f64>(&["neg_int"]), Some(-42.0));
+        assert_eq!(
+            gss.get_as::<Vec<i32>>(&["signed_list"]),
+            Some(vec![-10, 0, 10, -20])
+        );
+
+        // Single value parsing and formatting
+        assert_eq!(format_value_str("-42").unwrap(), "-42");
+        assert_eq!(format_value_str("+42").unwrap(), "42");
+        assert_eq!(format_value_str("-3.5").unwrap(), "-3.5");
+        assert_eq!(format_value_str("-50%").unwrap(), "-0.5");
+    }
 }
+

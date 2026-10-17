@@ -254,6 +254,18 @@
             "members": [
               {
                 "type": "PATTERN",
+                "value": "[+-]"
+              },
+              {
+                "type": "BLANK"
+              }
+            ]
+          },
+          {
+            "type": "CHOICE",
+            "members": [
+              {
+                "type": "PATTERN",
                 "value": "[0-9]+\\.[0-9]+"
               },
               {
@@ -276,15 +288,32 @@
     "number": {
       "type": "TOKEN",
       "content": {
-        "type": "CHOICE",
+        "type": "SEQ",
         "members": [
           {
-            "type": "PATTERN",
-            "value": "0x[0-9a-fA-F]+"
+            "type": "CHOICE",
+            "members": [
+              {
+                "type": "PATTERN",
+                "value": "[+-]"
+              },
+              {
+                "type": "BLANK"
+              }
+            ]
           },
           {
-            "type": "PATTERN",
-            "value": "[0-9]+"
+            "type": "CHOICE",
+            "members": [
+              {
+                "type": "PATTERN",
+                "value": "0x[0-9a-fA-F]+"
+              },
+              {
+                "type": "PATTERN",
+                "value": "[0-9]+"
+              }
+            ]
           }
         ]
       }
@@ -292,8 +321,25 @@
     "float": {
       "type": "TOKEN",
       "content": {
-        "type": "PATTERN",
-        "value": "[0-9]+\\.[0-9]+"
+        "type": "SEQ",
+        "members": [
+          {
+            "type": "CHOICE",
+            "members": [
+              {
+                "type": "PATTERN",
+                "value": "[+-]"
+              },
+              {
+                "type": "BLANK"
+              }
+            ]
+          },
+          {
+            "type": "PATTERN",
+            "value": "[0-9]+\\.[0-9]+"
+          }
+        ]
       }
     },
     "string": {

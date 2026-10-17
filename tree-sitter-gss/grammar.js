@@ -59,6 +59,7 @@ module.exports = grammar({
     boolean: _ => choice('true', 'false'),
 
     percentage: _ => token(seq(
+      optional(/[+-]/),
       choice(
         /[0-9]+\.[0-9]+/,
         /[0-9]+/,
@@ -67,12 +68,15 @@ module.exports = grammar({
       '%'
     )),
 
-    number: _ => token(choice(
-      /0x[0-9a-fA-F]+/,
-      /[0-9]+/
+    number: _ => token(seq(
+      optional(/[+-]/),
+      choice(
+        /0x[0-9a-fA-F]+/,
+        /[0-9]+/
+      )
     )),
 
-    float: _ => token(/[0-9]+\.[0-9]+/),
+    float: _ => token(seq(optional(/[+-]/), /[0-9]+\.[0-9]+/)),
 
     string: $ => seq(
       '"',
