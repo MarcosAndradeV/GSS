@@ -7,6 +7,38 @@ use lex_just_parse::lexer::*;
 use lex_just_parse::parser::{Parser, RefLexer, many1, sep_by};
 use lex_just_parse::try_parse;
 
+pub mod diff;
+pub use diff::unified_diff;
+
+/// Formatting configuration options for GSS pretty printing.
+///
+/// Inspired by formatting options in `rustfmt`, `prettier`, and `taplo`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FormatOptions {
+    /// Number of spaces per indentation level (default: 4).
+    pub indent_width: usize,
+    /// Whether to use tabs for indentation instead of spaces (default: false).
+    pub use_tabs: bool,
+    /// Maximum target print width for inline arrays before wrapping (default: 80).
+    pub print_width: usize,
+    /// Whether to allow key redefinition during parsing (default: false).
+    pub allow_redefinition: bool,
+    /// Whether to insert blank lines between top-level multiline blocks (default: false).
+    pub separate_blocks: bool,
+}
+
+impl Default for FormatOptions {
+    fn default() -> Self {
+        Self {
+            indent_width: 4,
+            use_tabs: false,
+            print_width: 80,
+            allow_redefinition: false,
+            separate_blocks: false,
+        }
+    }
+}
+
 #[cfg(not(feature = "value-enum"))]
 pub type Value = Box<dyn std::any::Any + 'static>;
 
@@ -279,24 +311,111 @@ fn escape_string_into(s: &str, out: &mut String) {
 }
 
 #[inline]
-fn write_indent(level: usize, out: &mut String) {
-    for _ in 0..level {
-        out.push_str("    ");
+fn write_indent(level: usize, opts: &FormatOptions, out: &mut String) {
+    if opts.use_tabs {
+        for _ in 0..level {
+            out.push('\t');
+        }
+    } else {
+        let count = level * opts.indent_width;
+        for _ in 0..count {
+            out.push(' ');
+        }
     }
 }
 
-fn format_vec_into(vec: &[Value], level: usize, out: &mut String) {
-    out.push('[');
+fn is_definitely_multiline(v: &Value) -> bool {
+    #[cfg(feature = "value-enum")]
+    match v {
+        Value::Object(obj) => !obj.inner.is_empty(),
+        Value::Vec(vec) => vec.iter().any(is_definitely_multiline),
+        _ => false,
+    }
+
+    #[cfg(not(feature = "value-enum"))]
+    {
+        if let Some(obj) = v.downcast_ref::<Object>() {
+            !obj.inner.is_empty()
+        } else if let Some(vec) = v.downcast_ref::<Vec<Value>>() {
+            vec.iter().any(is_definitely_multiline)
+        } else {
+            false
+        }
+    }
+}
+
+fn try_format_vec_inline(vec: &[Value], level: usize, opts: &FormatOptions) -> Option<String> {
+    for item in vec {
+        if is_definitely_multiline(item) {
+            return None;
+        }
+    }
+    let mut inline = String::new();
+    inline.push('[');
     for (i, item) in vec.iter().enumerate() {
         if i > 0 {
-            out.push_str(", ");
+            inline.push_str(", ");
         }
-        format_value_into(item, level, out);
+        format_value_into(item, level, opts, &mut inline);
+        if inline.contains('\n') {
+            return None;
+        }
     }
-    out.push(']');
+    inline.push(']');
+
+    let indent_cols = if opts.use_tabs {
+        level * 4
+    } else {
+        level * opts.indent_width
+    };
+    if indent_cols + inline.len() <= opts.print_width {
+        Some(inline)
+    } else {
+        None
+    }
 }
 
-fn format_object_into(obj: &Object, level: usize, out: &mut String) {
+fn format_vec_into(vec: &[Value], level: usize, opts: &FormatOptions, out: &mut String) {
+    if vec.is_empty() {
+        out.push_str("[]");
+        return;
+    }
+
+    if let Some(inline) = try_format_vec_inline(vec, level, opts) {
+        out.push_str(&inline);
+    } else {
+        out.push_str("[\n");
+        for item in vec {
+            write_indent(level + 1, opts, out);
+            format_value_into(item, level + 1, opts, out);
+            out.push_str(",\n");
+        }
+        write_indent(level, opts, out);
+        out.push(']');
+    }
+}
+
+fn is_multiline_value(v: &Value) -> bool {
+    #[cfg(feature = "value-enum")]
+    match v {
+        Value::Object(obj) => !obj.inner.is_empty(),
+        Value::Vec(vec) => !vec.is_empty() && (vec.len() > 3 || vec.iter().any(is_definitely_multiline)),
+        _ => false,
+    }
+
+    #[cfg(not(feature = "value-enum"))]
+    {
+        if let Some(obj) = v.downcast_ref::<Object>() {
+            !obj.inner.is_empty()
+        } else if let Some(vec) = v.downcast_ref::<Vec<Value>>() {
+            !vec.is_empty() && (vec.len() > 3 || vec.iter().any(is_definitely_multiline))
+        } else {
+            false
+        }
+    }
+}
+
+fn format_object_into(obj: &Object, level: usize, opts: &FormatOptions, out: &mut String) {
     if obj.inner.is_empty() {
         if level > 0 {
             out.push_str("{}");
@@ -312,27 +431,33 @@ fn format_object_into(obj: &Object, level: usize, out: &mut String) {
     entries.sort_unstable_by_key(|&(k, _)| k);
 
     if level == 0 {
-        for (k, v) in entries {
+        for (i, (k, v)) in entries.iter().enumerate() {
+            if opts.separate_blocks
+                && i > 0
+                && (is_multiline_value(v) || is_multiline_value(entries[i - 1].1))
+            {
+                out.push('\n');
+            }
             out.push_str(k);
             out.push_str(" = ");
-            format_value_into(v, 0, out);
+            format_value_into(v, 0, opts, out);
             out.push_str(",\n");
         }
     } else {
         out.push_str("{\n");
         for (k, v) in entries {
-            write_indent(level, out);
+            write_indent(level, opts, out);
             out.push_str(k);
             out.push_str(" = ");
-            format_value_into(v, level, out);
+            format_value_into(v, level, opts, out);
             out.push_str(",\n");
         }
-        write_indent(level.saturating_sub(1), out);
+        write_indent(level.saturating_sub(1), opts, out);
         out.push('}');
     }
 }
 
-fn format_value_into(v: &Value, level: usize, out: &mut String) {
+fn format_value_into(v: &Value, level: usize, opts: &FormatOptions, out: &mut String) {
     use std::fmt::Write;
 
     #[cfg(feature = "value-enum")]
@@ -351,13 +476,13 @@ fn format_value_into(v: &Value, level: usize, out: &mut String) {
             let _ = write!(out, "{b}");
         }
         Value::Object(obj) => {
-            format_object_into(obj, level + 1, out);
+            format_object_into(obj, level + 1, opts, out);
         }
         Value::Expr(expr) => {
             let _ = write!(out, "{expr}");
         }
         Value::Vec(vec) => {
-            format_vec_into(vec, level, out);
+            format_vec_into(vec, level, opts, out);
         }
     }
 
@@ -372,11 +497,11 @@ fn format_value_into(v: &Value, level: usize, out: &mut String) {
         } else if let Some(b) = v.downcast_ref::<bool>() {
             let _ = write!(out, "{b}");
         } else if let Some(obj) = v.downcast_ref::<Object>() {
-            format_object_into(obj, level + 1, out);
+            format_object_into(obj, level + 1, opts, out);
         } else if let Some(expr) = v.downcast_ref::<Expr>() {
             let _ = write!(out, "{expr}");
         } else if let Some(vec) = v.downcast_ref::<Vec<Value>>() {
-            format_vec_into(vec, level, out);
+            format_vec_into(vec, level, opts, out);
         } else if let Some(i) = v.downcast_ref::<u64>() {
             let _ = write!(out, "{i}");
         } else if let Some(i) = v.downcast_ref::<i64>() {
@@ -391,9 +516,13 @@ fn format_value_into(v: &Value, level: usize, out: &mut String) {
     }
 }
 
-fn format_value(v: &Value, level: usize) -> String {
+pub fn format_value(v: &Value, level: usize) -> String {
+    format_value_with_options(v, level, &FormatOptions::default())
+}
+
+pub fn format_value_with_options(v: &Value, level: usize, opts: &FormatOptions) -> String {
     let mut out = String::new();
-    format_value_into(v, level, &mut out);
+    format_value_into(v, level, opts, &mut out);
     out
 }
 
@@ -419,13 +548,21 @@ fn with_str_slice<R>(seq: &[String], f: impl FnOnce(&[&str]) -> R) -> R {
 
 impl Object {
     pub fn format_with_level(&self, level: usize) -> String {
+        self.format_with_options(level, &FormatOptions::default())
+    }
+
+    pub fn format_with_options(&self, level: usize, options: &FormatOptions) -> String {
         let mut out = String::with_capacity(self.inner.len() * 32);
-        format_object_into(self, level, &mut out);
+        format_object_into(self, level, options, &mut out);
         out
     }
 
     pub fn to_gss_string(&self) -> String {
         self.format_with_level(0)
+    }
+
+    pub fn to_gss_string_with_options(&self, options: &FormatOptions) -> String {
+        self.format_with_options(0, options)
     }
 
     pub fn dump(&self, level: usize) {
@@ -572,18 +709,27 @@ pub fn parse_str_with_options(source: &str, allow_redefinition: bool) -> Result<
 
 /// Formats a GSS source string into a canonical, cleanly indented GSS string.
 pub fn format_str(source: &str) -> Result<String, Box<dyn StdError>> {
-    format_str_with_options(source, false)
+    format_str_with_config(source, &FormatOptions::default())
 }
 
 /// Formats a GSS source string with custom parser options into a canonical GSS string.
 pub fn format_str_with_options(source: &str, allow_redefinition: bool) -> Result<String, Box<dyn StdError>> {
-    let gss = parse_str_with_options(source, allow_redefinition)?;
-    Ok(gss.to_gss_string())
+    let options = FormatOptions {
+        allow_redefinition,
+        ..Default::default()
+    };
+    format_str_with_config(source, &options)
+}
+
+/// Formats a GSS source string with custom format options into a canonical GSS string.
+pub fn format_str_with_config(source: &str, options: &FormatOptions) -> Result<String, Box<dyn StdError>> {
+    let gss = parse_str_with_options(source, options.allow_redefinition)?;
+    Ok(gss.to_gss_string_with_options(options))
 }
 
 /// Formats a GSS file and returns the canonical formatted string.
 pub fn format_file<P: AsRef<Path>>(file_path: P) -> Result<String, Box<dyn StdError>> {
-    format_file_with_options(file_path, false)
+    format_file_with_config(file_path, &FormatOptions::default())
 }
 
 /// Formats a GSS file with custom parser options and returns the canonical formatted string.
@@ -591,8 +737,20 @@ pub fn format_file_with_options<P: AsRef<Path>>(
     file_path: P,
     allow_redefinition: bool,
 ) -> Result<String, Box<dyn StdError>> {
-    let gss = load_gss_from_file_with_options(file_path, allow_redefinition)?;
-    Ok(gss.to_gss_string())
+    let options = FormatOptions {
+        allow_redefinition,
+        ..Default::default()
+    };
+    format_file_with_config(file_path, &options)
+}
+
+/// Formats a GSS file with custom format options and returns the canonical formatted string.
+pub fn format_file_with_config<P: AsRef<Path>>(
+    file_path: P,
+    options: &FormatOptions,
+) -> Result<String, Box<dyn StdError>> {
+    let gss = load_gss_from_file_with_options(file_path, options.allow_redefinition)?;
+    Ok(gss.to_gss_string_with_options(options))
 }
 
 /// Parses a single GSS value from a string.
@@ -634,7 +792,7 @@ pub fn load_value_from_file_with_options<P: AsRef<Path>>(
 
 /// Formats a single GSS value source string into canonical formatted GSS.
 pub fn format_value_str(source: &str) -> Result<String, Box<dyn StdError>> {
-    format_value_str_with_options(source, false)
+    format_value_str_with_config(source, &FormatOptions::default())
 }
 
 /// Formats a single GSS value source string with custom parser options into canonical formatted GSS.
@@ -642,13 +800,25 @@ pub fn format_value_str_with_options(
     source: &str,
     allow_redefinition: bool,
 ) -> Result<String, Box<dyn StdError>> {
-    let val = parse_value_str_with_options(source, allow_redefinition)?;
-    Ok(format_value(&val, 0))
+    let options = FormatOptions {
+        allow_redefinition,
+        ..Default::default()
+    };
+    format_value_str_with_config(source, &options)
+}
+
+/// Formats a single GSS value source string with custom format options into canonical formatted GSS.
+pub fn format_value_str_with_config(
+    source: &str,
+    options: &FormatOptions,
+) -> Result<String, Box<dyn StdError>> {
+    let val = parse_value_str_with_options(source, options.allow_redefinition)?;
+    Ok(format_value_with_options(&val, 0, options))
 }
 
 /// Formats a single GSS value from a file and returns the canonical formatted string.
 pub fn format_value_file<P: AsRef<Path>>(file_path: P) -> Result<String, Box<dyn StdError>> {
-    format_value_file_with_options(file_path, false)
+    format_value_file_with_config(file_path, &FormatOptions::default())
 }
 
 /// Formats a single GSS value from a file with custom parser options and returns the canonical formatted string.
@@ -656,8 +826,20 @@ pub fn format_value_file_with_options<P: AsRef<Path>>(
     file_path: P,
     allow_redefinition: bool,
 ) -> Result<String, Box<dyn StdError>> {
-    let val = load_value_from_file_with_options(file_path, allow_redefinition)?;
-    Ok(format_value(&val, 0))
+    let options = FormatOptions {
+        allow_redefinition,
+        ..Default::default()
+    };
+    format_value_file_with_config(file_path, &options)
+}
+
+/// Formats a single GSS value from a file with custom format options and returns the canonical formatted string.
+pub fn format_value_file_with_config<P: AsRef<Path>>(
+    file_path: P,
+    options: &FormatOptions,
+) -> Result<String, Box<dyn StdError>> {
+    let val = load_value_from_file_with_options(file_path, options.allow_redefinition)?;
+    Ok(format_value_with_options(&val, 0, options))
 }
 
 fn parse_single_value_entry<'lex, P: AsRef<Path>>(
@@ -1556,5 +1738,79 @@ mod tests {
         assert_eq!(format_value_str("-3.5").unwrap(), "-3.5");
         assert_eq!(format_value_str("-50%").unwrap(), "-0.5");
     }
-}
 
+    #[test]
+    fn test_pretty_format_list_of_objects() {
+        let source = r#"
+            items = [
+                { id = 1, name = "first" },
+                { id = 2, name = "second" },
+            ],
+        "#;
+        let formatted = format_str(source).expect("Should format list of objects");
+        let expected = "items = [\n    {\n        id = 1,\n        name = \"first\",\n    },\n    {\n        id = 2,\n        name = \"second\",\n    },\n],\n";
+        assert_eq!(formatted, expected);
+
+        // Reparsing must succeed and be equivalent
+        let gss = parse_str(&formatted).expect("Should reparse formatted output");
+        let items = gss.get::<Vec<Value>>(&["items"]).unwrap();
+        assert_eq!(items.len(), 2);
+    }
+
+    #[test]
+    fn test_pretty_format_wrapping_long_list() {
+        let source = r#"
+            urls = [
+                "https://api.example.com/v1/auth/login",
+                "https://api.example.com/v1/auth/logout",
+                "https://api.example.com/v1/auth/refresh"
+            ]
+        "#;
+        let formatted = format_str(source).expect("Should format long list");
+        assert!(formatted.contains("urls = [\n"));
+        assert!(formatted.contains("    \"https://api.example.com/v1/auth/login\",\n"));
+        assert!(formatted.ends_with("],\n"));
+    }
+
+    #[test]
+    fn test_format_options_custom_indent_and_tabs() {
+        let source = "obj = { a = 1, b = 2 }";
+
+        // 2 spaces
+        let opts_2_spaces = FormatOptions {
+            indent_width: 2,
+            ..Default::default()
+        };
+        let formatted_2 = format_str_with_config(source, &opts_2_spaces).unwrap();
+        assert_eq!(formatted_2, "obj = {\n  a = 1,\n  b = 2,\n},\n");
+
+        // Tabs
+        let opts_tabs = FormatOptions {
+            use_tabs: true,
+            ..Default::default()
+        };
+        let formatted_tabs = format_str_with_config(source, &opts_tabs).unwrap();
+        assert_eq!(formatted_tabs, "obj = {\n\ta = 1,\n\tb = 2,\n},\n");
+    }
+
+    #[test]
+    fn test_format_options_separate_blocks() {
+        let source = r#"
+            name = "App",
+            database = {
+                host = "localhost",
+            },
+            server = {
+                port = 8080,
+            },
+            version = 1,
+        "#;
+        let opts = FormatOptions {
+            separate_blocks: true,
+            ..Default::default()
+        };
+        let formatted = format_str_with_config(source, &opts).unwrap();
+        let expected = "database = {\n    host = \"localhost\",\n},\n\nname = \"App\",\n\nserver = {\n    port = 8080,\n},\n\nversion = 1,\n";
+        assert_eq!(formatted, expected);
+    }
+}

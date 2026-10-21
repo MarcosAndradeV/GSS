@@ -40,8 +40,18 @@ fn main_loop(
                             .and_then(|u| u.as_str())
                             .unwrap_or_default();
 
+                        let mut fmt_opts = gss::FormatOptions::default();
+                        if let Some(opts) = params.get("options") {
+                            if let Some(tab_size) = opts.get("tabSize").and_then(|ts| ts.as_u64()) {
+                                fmt_opts.indent_width = tab_size as usize;
+                            }
+                            if let Some(insert_spaces) = opts.get("insertSpaces").and_then(|is| is.as_bool()) {
+                                fmt_opts.use_tabs = !insert_spaces;
+                            }
+                        }
+
                         let text = documents.get(uri).cloned().unwrap_or_default();
-                        let result = match gss::format_str(&text) {
+                        let result = match gss::format_str_with_config(&text, &fmt_opts) {
                             Ok(formatted) => {
                                 if formatted == text {
                                     json!([])

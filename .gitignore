@@ -1,4 +1,5 @@
 /target
+editors/zed/grammars/
 
 
 # Added by cargo
@@ -6,3 +7,4 @@
 # already existing elements were commented out
 
 #/target
+editors/zed/grammars/
