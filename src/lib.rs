@@ -223,6 +223,52 @@ impl FromGssValue for Value {
     }
 }
 
+pub trait ToGssValue {
+    fn to_gss_value(value: &Self) -> Value;
+}
+
+macro_rules! impl_to_gss {
+    ($($v:expr => $t:ty),*) => {
+        $(
+            impl ToGssValue for $t {
+                fn to_gss_value(value: &Self) -> Value {
+                    $v(*value as _)
+                }
+            }
+        )*
+    };
+}
+
+impl_to_gss! {
+    Value::Number => u8,
+    Value::Number => u16,
+    Value::Number => u32,
+    Value::Number => u64,
+    Value::Number => u128,
+    Value::Number => usize,
+    Value::SignedNumber => i8,
+    Value::SignedNumber => i16,
+    Value::SignedNumber => i32,
+    Value::SignedNumber => i64,
+    Value::SignedNumber => i128,
+    Value::SignedNumber => isize,
+    Value::Float => f32,
+    Value::Float => f64,
+    Value::Bool => bool
+}
+
+impl ToGssValue for String {
+    fn to_gss_value(value: &Self) -> Value {
+        Value::String(value.clone())
+    }
+}
+
+impl ToGssValue for Vec<Value> {
+    fn to_gss_value(value: &Self) -> Value {
+        Value::Vec(value.clone())
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Object {
     inner: HashMap<String, Value>,
@@ -1784,5 +1830,153 @@ mod tests {
         let formatted = format_str_with_config(source, &opts).unwrap();
         let expected = "database = {\n    host = \"localhost\",\n},\n\nname = \"App\",\n\nserver = {\n    port = 8080,\n},\n\nversion = 1,\n";
         assert_eq!(formatted, expected);
+    }
+
+    #[test]
+    fn test_to_gss_value_unsigned_integers() {
+        assert_eq!(ToGssValue::to_gss_value(&0u8), Value::Number(0));
+        assert_eq!(ToGssValue::to_gss_value(&42u8), Value::Number(42));
+        assert_eq!(ToGssValue::to_gss_value(&u8::MAX), Value::Number(255));
+
+        assert_eq!(ToGssValue::to_gss_value(&0u16), Value::Number(0));
+        assert_eq!(ToGssValue::to_gss_value(&1000u16), Value::Number(1000));
+        assert_eq!(ToGssValue::to_gss_value(&u16::MAX), Value::Number(65535));
+
+        assert_eq!(ToGssValue::to_gss_value(&0u32), Value::Number(0));
+        assert_eq!(ToGssValue::to_gss_value(&42u32), Value::Number(42));
+        assert_eq!(ToGssValue::to_gss_value(&u32::MAX), Value::Number(u32::MAX));
+
+        assert_eq!(ToGssValue::to_gss_value(&0u64), Value::Number(0));
+        assert_eq!(ToGssValue::to_gss_value(&123456u64), Value::Number(123456));
+
+        assert_eq!(ToGssValue::to_gss_value(&0u128), Value::Number(0));
+        assert_eq!(ToGssValue::to_gss_value(&78910u128), Value::Number(78910));
+
+        assert_eq!(ToGssValue::to_gss_value(&0usize), Value::Number(0));
+        assert_eq!(ToGssValue::to_gss_value(&1024usize), Value::Number(1024));
+    }
+
+    #[test]
+    fn test_to_gss_value_signed_integers() {
+        assert_eq!(ToGssValue::to_gss_value(&0i8), Value::SignedNumber(0));
+        assert_eq!(ToGssValue::to_gss_value(&42i8), Value::SignedNumber(42));
+        assert_eq!(ToGssValue::to_gss_value(&(-42i8)), Value::SignedNumber(-42));
+        assert_eq!(ToGssValue::to_gss_value(&i8::MIN), Value::SignedNumber(-128));
+        assert_eq!(ToGssValue::to_gss_value(&i8::MAX), Value::SignedNumber(127));
+
+        assert_eq!(ToGssValue::to_gss_value(&0i16), Value::SignedNumber(0));
+        assert_eq!(ToGssValue::to_gss_value(&1000i16), Value::SignedNumber(1000));
+        assert_eq!(ToGssValue::to_gss_value(&(-1000i16)), Value::SignedNumber(-1000));
+
+        assert_eq!(ToGssValue::to_gss_value(&0i32), Value::SignedNumber(0));
+        assert_eq!(ToGssValue::to_gss_value(&42i32), Value::SignedNumber(42));
+        assert_eq!(ToGssValue::to_gss_value(&(-42i32)), Value::SignedNumber(-42));
+        assert_eq!(ToGssValue::to_gss_value(&i32::MIN), Value::SignedNumber(i32::MIN));
+        assert_eq!(ToGssValue::to_gss_value(&i32::MAX), Value::SignedNumber(i32::MAX));
+
+        assert_eq!(ToGssValue::to_gss_value(&0i64), Value::SignedNumber(0));
+        assert_eq!(ToGssValue::to_gss_value(&(-123456i64)), Value::SignedNumber(-123456));
+
+        assert_eq!(ToGssValue::to_gss_value(&0i128), Value::SignedNumber(0));
+        assert_eq!(ToGssValue::to_gss_value(&(-78910i128)), Value::SignedNumber(-78910));
+
+        assert_eq!(ToGssValue::to_gss_value(&0isize), Value::SignedNumber(0));
+        assert_eq!(ToGssValue::to_gss_value(&(-1024isize)), Value::SignedNumber(-1024));
+    }
+
+    #[test]
+    fn test_to_gss_value_floats() {
+        assert_eq!(ToGssValue::to_gss_value(&0.0f32), Value::Float(0.0));
+        assert_eq!(ToGssValue::to_gss_value(&2.5f32), Value::Float(2.5));
+        assert_eq!(ToGssValue::to_gss_value(&(-42.5f32)), Value::Float(-42.5));
+
+        assert_eq!(ToGssValue::to_gss_value(&0.0f64), Value::Float(0.0));
+        assert_eq!(ToGssValue::to_gss_value(&2.5f64), Value::Float(2.5f32));
+        assert_eq!(ToGssValue::to_gss_value(&(-42.5f64)), Value::Float(-42.5f32));
+    }
+
+    #[test]
+    fn test_to_gss_value_bool() {
+        assert_eq!(ToGssValue::to_gss_value(&true), Value::Bool(true));
+        assert_eq!(ToGssValue::to_gss_value(&false), Value::Bool(false));
+    }
+
+    #[test]
+    fn test_to_gss_value_string() {
+        let empty = String::new();
+        assert_eq!(ToGssValue::to_gss_value(&empty), Value::String(String::new()));
+
+        let text = "Hello GSS".to_string();
+        assert_eq!(
+            ToGssValue::to_gss_value(&text),
+            Value::String("Hello GSS".to_string())
+        );
+
+        let unicode = "🚀 rust 🦀".to_string();
+        assert_eq!(
+            ToGssValue::to_gss_value(&unicode),
+            Value::String("🚀 rust 🦀".to_string())
+        );
+    }
+
+    #[test]
+    fn test_to_gss_value_vec() {
+        let empty: Vec<Value> = vec![];
+        assert_eq!(ToGssValue::to_gss_value(&empty), Value::Vec(vec![]));
+
+        let items = vec![
+            Value::Number(10),
+            Value::SignedNumber(-20),
+            Value::Float(1.5),
+            Value::Bool(true),
+            Value::String("gss".to_string()),
+        ];
+        assert_eq!(ToGssValue::to_gss_value(&items), Value::Vec(items.clone()));
+    }
+
+    #[test]
+    fn test_to_gss_value_generic_function() {
+        fn to_val<T: ToGssValue>(val: &T) -> Value {
+            ToGssValue::to_gss_value(val)
+        }
+
+        assert_eq!(to_val(&100u32), Value::Number(100));
+        assert_eq!(to_val(&(-50i32)), Value::SignedNumber(-50));
+        assert_eq!(to_val(&12.5f32), Value::Float(12.5));
+        assert_eq!(to_val(&true), Value::Bool(true));
+        assert_eq!(to_val(&"test".to_string()), Value::String("test".to_string()));
+    }
+
+    #[test]
+    fn test_to_gss_value_roundtrip() {
+        // u32 roundtrip
+        let orig_u32 = 42u32;
+        let gss_val = ToGssValue::to_gss_value(&orig_u32);
+        assert_eq!(u32::from_gss_value(&gss_val), Some(orig_u32));
+
+        // i32 roundtrip
+        let orig_i32 = -42i32;
+        let gss_val = ToGssValue::to_gss_value(&orig_i32);
+        assert_eq!(i32::from_gss_value(&gss_val), Some(orig_i32));
+
+        // f32 roundtrip
+        let orig_f32 = 2.5f32;
+        let gss_val = ToGssValue::to_gss_value(&orig_f32);
+        assert_eq!(f32::from_gss_value(&gss_val), Some(orig_f32));
+
+        // bool roundtrip
+        let orig_bool = true;
+        let gss_val = ToGssValue::to_gss_value(&orig_bool);
+        assert_eq!(bool::from_gss_value(&gss_val), Some(orig_bool));
+
+        // String roundtrip
+        let orig_str = "roundtrip".to_string();
+        let gss_val = ToGssValue::to_gss_value(&orig_str);
+        assert_eq!(String::from_gss_value(&gss_val), Some(orig_str));
+
+        // Vec<Value> roundtrip
+        let orig_vec = vec![Value::Number(1), Value::SignedNumber(-1), Value::Bool(false)];
+        let gss_val = ToGssValue::to_gss_value(&orig_vec);
+        assert_eq!(Vec::<Value>::from_gss_value(&gss_val), Some(orig_vec));
     }
 }
