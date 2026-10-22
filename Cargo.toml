@@ -41,3 +41,7 @@ path = "tests/test_gss_fmt.rs"
 name = "test_gss_lsp"
 path = "tests/test_gss_lsp.rs"
 required-features = ["lsp"]
+
+[[test]]
+name = "test_lazy_gss"
+path = "tests/test_lazy_gss.rs"

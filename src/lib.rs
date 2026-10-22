@@ -9,6 +9,7 @@ use lex_just_parse::try_parse;
 
 pub mod diff;
 pub use diff::unified_diff;
+pub mod lazy;
 
 /// Formatting configuration options for GSS pretty printing.
 ///

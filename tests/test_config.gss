@@ -1,0 +1,8 @@
+net = {
+    port = "8070",
+    host = "127.0.0.1",
+},
+
+system = {
+    workers = 8,
+},
