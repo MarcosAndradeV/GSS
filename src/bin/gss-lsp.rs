@@ -45,7 +45,9 @@ fn main_loop(
                             if let Some(tab_size) = opts.get("tabSize").and_then(|ts| ts.as_u64()) {
                                 fmt_opts.indent_width = tab_size as usize;
                             }
-                            if let Some(insert_spaces) = opts.get("insertSpaces").and_then(|is| is.as_bool()) {
+                            if let Some(insert_spaces) =
+                                opts.get("insertSpaces").and_then(|is| is.as_bool())
+                            {
                                 fmt_opts.use_tabs = !insert_spaces;
                             }
                         }
@@ -165,7 +167,10 @@ fn parse_error_to_diagnostic(err: &str, text: &str) -> serde_json::Value {
 
     let parts: Vec<&str> = err.splitn(4, ':').collect();
     if parts.len() >= 4 {
-        if let (Ok(l), Ok(c)) = (parts[1].trim().parse::<u32>(), parts[2].trim().parse::<u32>()) {
+        if let (Ok(l), Ok(c)) = (
+            parts[1].trim().parse::<u32>(),
+            parts[2].trim().parse::<u32>(),
+        ) {
             line = l.saturating_sub(1);
             col = c.saturating_sub(1);
             message = parts[3].trim();

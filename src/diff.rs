@@ -28,7 +28,10 @@ pub fn compute_line_diff<'a>(orig: &[&'a str], fmt: &[&'a str]) -> Vec<DiffLine<
 
     // Fast path: common suffix
     let mut suffix = 0;
-    while suffix < (n - prefix) && suffix < (m - prefix) && orig[n - 1 - suffix] == fmt[m - 1 - suffix] {
+    while suffix < (n - prefix)
+        && suffix < (m - prefix)
+        && orig[n - 1 - suffix] == fmt[m - 1 - suffix]
+    {
         suffix += 1;
     }
 
@@ -302,7 +305,10 @@ mod tests {
     #[test]
     fn test_unified_diff_identical() {
         let content = "a = 1,\nb = 2,\n";
-        assert_eq!(unified_diff(content, content, "a/test", "b/test", false), "");
+        assert_eq!(
+            unified_diff(content, content, "a/test", "b/test", false),
+            ""
+        );
     }
 
     #[test]

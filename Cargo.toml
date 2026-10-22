@@ -15,9 +15,9 @@ serde = { version = "1.0.229", features = ["derive"], optional = true }
 serde_json = { version = "1.0.154", optional = true }
 
 [features]
-default = ["interning", "value-enum"]
+default = ["interning"]
+lazy = []
 interning = ["lex-just-parse/interning"]
-value-enum = []
 lsp = ["dep:lsp-server", "dep:serde", "dep:serde_json"]
 
 [[bin]]
@@ -45,3 +45,4 @@ required-features = ["lsp"]
 [[test]]
 name = "test_lazy_gss"
 path = "tests/test_lazy_gss.rs"
+required-features = ["lazy"]

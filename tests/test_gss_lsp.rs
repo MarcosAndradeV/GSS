@@ -1,6 +1,6 @@
+use serde_json::{Value, json};
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Command, Stdio};
-use serde_json::{json, Value};
 
 fn send_rpc(stdin: &mut dyn Write, msg: &Value) {
     let body = serde_json::to_string(msg).unwrap();
@@ -187,7 +187,12 @@ fn test_lsp_diagnostics_on_syntax_error() {
     assert_eq!(diag_not["method"], "textDocument/publishDiagnostics");
     let diags = diag_not["params"]["diagnostics"].as_array().unwrap();
     assert_eq!(diags.len(), 1);
-    assert!(diags[0]["message"].as_str().unwrap().contains("Redefinition of key key"));
+    assert!(
+        diags[0]["message"]
+            .as_str()
+            .unwrap()
+            .contains("Redefinition of key key")
+    );
 
     // Cleanup
     send_rpc(

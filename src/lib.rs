@@ -9,6 +9,7 @@ use lex_just_parse::try_parse;
 
 pub mod diff;
 pub use diff::unified_diff;
+#[cfg(feature = "lazy")]
 pub mod lazy;
 
 /// Formatting configuration options for GSS pretty printing.
@@ -40,10 +41,6 @@ impl Default for FormatOptions {
     }
 }
 
-#[cfg(not(feature = "value-enum"))]
-pub type Value = Box<dyn std::any::Any + 'static>;
-
-#[cfg(feature = "value-enum")]
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
     Number(u32),
@@ -56,7 +53,6 @@ pub enum Value {
     Vec(Vec<Value>),
 }
 
-#[cfg(feature = "value-enum")]
 impl Value {
     pub fn downcast_ref<T: 'static>(&self) -> Option<&T> {
         let any: &dyn std::any::Any = match self {
@@ -71,64 +67,72 @@ impl Value {
         };
         any.downcast_ref::<T>()
     }
+
+    pub fn as_number(&self) -> Option<&u32> {
+        if let Self::Number(v) = self {
+            Some(v)
+        } else {
+            None
+        }
+    }
+
+    pub fn as_signed_number(&self) -> Option<&i32> {
+        if let Self::SignedNumber(v) = self {
+            Some(v)
+        } else {
+            None
+        }
+    }
+
+    pub fn as_float(&self) -> Option<&f32> {
+        if let Self::Float(v) = self {
+            Some(v)
+        } else {
+            None
+        }
+    }
+
+    pub fn as_bool(&self) -> Option<&bool> {
+        if let Self::Bool(v) = self {
+            Some(v)
+        } else {
+            None
+        }
+    }
+
+    pub fn as_string(&self) -> Option<&String> {
+        if let Self::String(v) = self {
+            Some(v)
+        } else {
+            None
+        }
+    }
+
+    pub fn as_object(&self) -> Option<&Object> {
+        if let Self::Object(v) = self {
+            Some(v)
+        } else {
+            None
+        }
+    }
+
+    pub fn as_expr(&self) -> Option<&Expr> {
+        if let Self::Expr(v) = self {
+            Some(v)
+        } else {
+            None
+        }
+    }
+
+    pub fn as_vec(&self) -> Option<&Vec<Value>> {
+        if let Self::Vec(v) = self {
+            Some(v)
+        } else {
+            None
+        }
+    }
 }
 
-// Helper constructors to build Values under both configurations
-fn new_number(x: u32) -> Value {
-    #[cfg(not(feature = "value-enum"))]
-    { Box::new(x) }
-    #[cfg(feature = "value-enum")]
-    { Value::Number(x) }
-}
-
-fn new_signed_number(x: i32) -> Value {
-    #[cfg(not(feature = "value-enum"))]
-    { Box::new(x) }
-    #[cfg(feature = "value-enum")]
-    { Value::SignedNumber(x) }
-}
-
-fn new_float(x: f32) -> Value {
-    #[cfg(not(feature = "value-enum"))]
-    { Box::new(x) }
-    #[cfg(feature = "value-enum")]
-    { Value::Float(x) }
-}
-
-fn new_bool(x: bool) -> Value {
-    #[cfg(not(feature = "value-enum"))]
-    { Box::new(x) }
-    #[cfg(feature = "value-enum")]
-    { Value::Bool(x) }
-}
-
-fn new_string(x: String) -> Value {
-    #[cfg(not(feature = "value-enum"))]
-    { Box::new(x) }
-    #[cfg(feature = "value-enum")]
-    { Value::String(x) }
-}
-
-fn new_object(x: Object) -> Value {
-    #[cfg(not(feature = "value-enum"))]
-    { Box::new(x) }
-    #[cfg(feature = "value-enum")]
-    { Value::Object(x) }
-}
-
-fn new_expr(x: Expr) -> Value {
-    #[cfg(not(feature = "value-enum"))]
-    { Box::new(x) }
-    #[cfg(feature = "value-enum")]
-    { Value::Expr(x) }
-}
-
-fn new_vec(x: Vec<Value>) -> Value {
-    #[cfg(not(feature = "value-enum"))]
-    { Box::new(x) }
-    #[cfg(feature = "value-enum")]
-    { Value::Vec(x) }
-}
 pub type Percent = f32;
 pub type Gss = Object;
 
@@ -141,11 +145,11 @@ macro_rules! impl_from_gss_for_int {
         $(
             impl FromGssValue for $t {
                 fn from_gss_value(value: &Value) -> Option<Self> {
-                    if let Some(x) = value.downcast_ref::<u32>() {
+                    if let Some(x) = value.as_number() {
                         <$t>::try_from(*x).ok()
-                    } else if let Some(x) = value.downcast_ref::<i32>() {
+                    } else if let Some(x) = value.as_signed_number() {
                         <$t>::try_from(*x).ok()
-                    } else if let Some(x) = value.downcast_ref::<f32>() {
+                    } else if let Some(x) = value.as_float() {
                         if x.fract() == 0.0 && *x >= (<$t>::MIN as f32) && *x <= (<$t>::MAX as f32) {
                             Some(*x as $t)
                         } else {
@@ -162,15 +166,17 @@ macro_rules! impl_from_gss_for_int {
     };
 }
 
-impl_from_gss_for_int!(u8, u16, u32, u64, u128, usize, i8, i16, i32, i64, i128, isize);
+impl_from_gss_for_int!(
+    u8, u16, u32, u64, u128, usize, i8, i16, i32, i64, i128, isize
+);
 
 impl FromGssValue for f32 {
     fn from_gss_value(value: &Value) -> Option<Self> {
-        if let Some(x) = value.downcast_ref::<f32>() {
+        if let Some(x) = value.as_float() {
             Some(*x)
-        } else if let Some(x) = value.downcast_ref::<u32>() {
+        } else if let Some(x) = value.as_number() {
             Some(*x as f32)
-        } else if let Some(x) = value.downcast_ref::<i32>() {
+        } else if let Some(x) = value.as_signed_number() {
             Some(*x as f32)
         } else {
             None
@@ -180,11 +186,11 @@ impl FromGssValue for f32 {
 
 impl FromGssValue for f64 {
     fn from_gss_value(value: &Value) -> Option<Self> {
-        if let Some(x) = value.downcast_ref::<f32>() {
+        if let Some(x) = value.as_float() {
             Some(*x as f64)
-        } else if let Some(x) = value.downcast_ref::<u32>() {
+        } else if let Some(x) = value.as_number() {
             Some(*x as f64)
-        } else if let Some(x) = value.downcast_ref::<i32>() {
+        } else if let Some(x) = value.as_signed_number() {
             Some(*x as f64)
         } else if let Some(x) = value.downcast_ref::<f64>() {
             Some(*x)
@@ -196,66 +202,35 @@ impl FromGssValue for f64 {
 
 impl FromGssValue for bool {
     fn from_gss_value(value: &Value) -> Option<Self> {
-        value.downcast_ref::<bool>().copied()
+        value.as_bool().copied()
     }
 }
 
 impl FromGssValue for String {
     fn from_gss_value(value: &Value) -> Option<Self> {
-        value.downcast_ref::<String>().cloned()
+        value.as_string().cloned()
     }
 }
 impl<T: FromGssValue> FromGssValue for Vec<T> {
     fn from_gss_value(value: &Value) -> Option<Self> {
-        value.downcast_ref::<Vec<Value>>()?
-            .iter()
-            .map(T::from_gss_value)
-            .collect()
+        value.as_vec()?.iter().map(T::from_gss_value).collect()
     }
 }
 
-#[cfg(feature = "value-enum")]
 impl FromGssValue for Value {
     fn from_gss_value(value: &Value) -> Option<Self> {
         Some(value.clone())
     }
 }
 
-#[cfg(not(feature = "value-enum"))]
-impl FromGssValue for Box<dyn std::any::Any + 'static> {
-    fn from_gss_value(value: &Value) -> Option<Self> {
-        if let Some(x) = value.downcast_ref::<u32>() {
-            Some(Box::new(*x))
-        } else if let Some(x) = value.downcast_ref::<i32>() {
-            Some(Box::new(*x))
-        } else if let Some(x) = value.downcast_ref::<f32>() {
-            Some(Box::new(*x))
-        } else if let Some(x) = value.downcast_ref::<bool>() {
-            Some(Box::new(*x))
-        } else if let Some(x) = value.downcast_ref::<String>() {
-            Some(Box::new(x.clone()))
-        } else if let Some(x) = value.downcast_ref::<Vec<Value>>() {
-            let mut new_vec = Vec::new();
-            for item in x {
-                new_vec.push(Value::from_gss_value(item)?);
-            }
-            Some(Box::new(new_vec))
-        } else {
-            None
-        }
-    }
-}
-
-#[derive(Debug)]
-#[cfg_attr(feature = "value-enum", derive(Clone, PartialEq))]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Object {
     inner: HashMap<String, Value>,
     max_depth: usize,
     allow_redefinition: bool,
 }
 
-#[derive(Debug)]
-#[cfg_attr(feature = "value-enum", derive(Clone, PartialEq))]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
     Symbol(String),
     Access(Vec<String>),
@@ -326,22 +301,10 @@ fn write_indent(level: usize, opts: &FormatOptions, out: &mut String) {
 }
 
 fn is_definitely_multiline(v: &Value) -> bool {
-    #[cfg(feature = "value-enum")]
     match v {
         Value::Object(obj) => !obj.inner.is_empty(),
         Value::Vec(vec) => vec.iter().any(is_definitely_multiline),
         _ => false,
-    }
-
-    #[cfg(not(feature = "value-enum"))]
-    {
-        if let Some(obj) = v.downcast_ref::<Object>() {
-            !obj.inner.is_empty()
-        } else if let Some(vec) = v.downcast_ref::<Vec<Value>>() {
-            vec.iter().any(is_definitely_multiline)
-        } else {
-            false
-        }
     }
 }
 
@@ -397,22 +360,12 @@ fn format_vec_into(vec: &[Value], level: usize, opts: &FormatOptions, out: &mut 
 }
 
 fn is_multiline_value(v: &Value) -> bool {
-    #[cfg(feature = "value-enum")]
     match v {
         Value::Object(obj) => !obj.inner.is_empty(),
-        Value::Vec(vec) => !vec.is_empty() && (vec.len() > 3 || vec.iter().any(is_definitely_multiline)),
-        _ => false,
-    }
-
-    #[cfg(not(feature = "value-enum"))]
-    {
-        if let Some(obj) = v.downcast_ref::<Object>() {
-            !obj.inner.is_empty()
-        } else if let Some(vec) = v.downcast_ref::<Vec<Value>>() {
+        Value::Vec(vec) => {
             !vec.is_empty() && (vec.len() > 3 || vec.iter().any(is_definitely_multiline))
-        } else {
-            false
         }
+        _ => false,
     }
 }
 
@@ -424,11 +377,7 @@ fn format_object_into(obj: &Object, level: usize, opts: &FormatOptions, out: &mu
         return;
     }
 
-    let mut entries: Vec<(&str, &Value)> = obj
-        .inner
-        .iter()
-        .map(|(k, v)| (k.as_str(), v))
-        .collect();
+    let mut entries: Vec<(&str, &Value)> = obj.inner.iter().map(|(k, v)| (k.as_str(), v)).collect();
     entries.sort_unstable_by_key(|&(k, _)| k);
 
     if level == 0 {
@@ -461,7 +410,6 @@ fn format_object_into(obj: &Object, level: usize, opts: &FormatOptions, out: &mu
 fn format_value_into(v: &Value, level: usize, opts: &FormatOptions, out: &mut String) {
     use std::fmt::Write;
 
-    #[cfg(feature = "value-enum")]
     match v {
         Value::String(string) => escape_string_into(string, out),
         Value::Number(i) => {
@@ -484,35 +432,6 @@ fn format_value_into(v: &Value, level: usize, opts: &FormatOptions, out: &mut St
         }
         Value::Vec(vec) => {
             format_vec_into(vec, level, opts, out);
-        }
-    }
-
-    #[cfg(not(feature = "value-enum"))]
-    {
-        if let Some(string) = v.downcast_ref::<String>() {
-            escape_string_into(string, out);
-        } else if let Some(i) = v.downcast_ref::<u32>() {
-            let _ = write!(out, "{i}");
-        } else if let Some(f) = v.downcast_ref::<f32>() {
-            let _ = write!(out, "{f}");
-        } else if let Some(b) = v.downcast_ref::<bool>() {
-            let _ = write!(out, "{b}");
-        } else if let Some(obj) = v.downcast_ref::<Object>() {
-            format_object_into(obj, level + 1, opts, out);
-        } else if let Some(expr) = v.downcast_ref::<Expr>() {
-            let _ = write!(out, "{expr}");
-        } else if let Some(vec) = v.downcast_ref::<Vec<Value>>() {
-            format_vec_into(vec, level, opts, out);
-        } else if let Some(i) = v.downcast_ref::<u64>() {
-            let _ = write!(out, "{i}");
-        } else if let Some(i) = v.downcast_ref::<i64>() {
-            let _ = write!(out, "{i}");
-        } else if let Some(i) = v.downcast_ref::<i32>() {
-            let _ = write!(out, "{i}");
-        } else if let Some(f) = v.downcast_ref::<f64>() {
-            let _ = write!(out, "{f}");
-        } else {
-            let _ = write!(out, "UNKNOWN({:?})", std::any::Any::type_id(v));
         }
     }
 }
@@ -613,25 +532,29 @@ impl Object {
         if let Some((last, prefix)) = path.split_last() {
             for c in prefix {
                 if let Some(v) = obj.inner.get(*c) {
-                    if let Some(o) = v.downcast_ref::<Object>() {
+                    if let Some(o) = v.as_object() {
                         obj = o;
-                    } else if let Some(expr) = v.downcast_ref::<Expr>() {
+                    } else if let Some(expr) = v.as_expr() {
                         obj = match expr {
                             Expr::Symbol(s) => {
-                                let val = self.get_value_impl(&[s.as_str()], current_depth + 1, max_depth)?;
-                                val.downcast_ref::<Object>()?
+                                let val = self.get_value_impl(
+                                    &[s.as_str()],
+                                    current_depth + 1,
+                                    max_depth,
+                                )?;
+                                val.as_object()?
                             }
                             Expr::Access(seq) => {
                                 let val = with_str_slice(seq, |tmp| {
                                     self.get_value_impl(tmp, current_depth + 1, max_depth)
                                 })?;
-                                val.downcast_ref::<Object>()?
+                                val.as_object()?
                             }
                             Expr::RelAccess(seq) => {
                                 let val = with_str_slice(seq, |tmp| {
                                     obj.get_value_impl(tmp, current_depth + 1, max_depth)
                                 })?;
-                                val.downcast_ref::<Object>()?
+                                val.as_object()?
                             }
                         };
                     } else {
@@ -648,16 +571,12 @@ impl Object {
                         Expr::Symbol(s) => {
                             self.get_value_impl(&[s.as_str()], current_depth + 1, max_depth)
                         }
-                        Expr::Access(seq) => {
-                            with_str_slice(seq, |tmp| {
-                                self.get_value_impl(tmp, current_depth + 1, max_depth)
-                            })
-                        }
-                        Expr::RelAccess(seq) => {
-                            with_str_slice(seq, |tmp| {
-                                obj.get_value_impl(tmp, current_depth + 1, max_depth)
-                            })
-                        }
+                        Expr::Access(seq) => with_str_slice(seq, |tmp| {
+                            self.get_value_impl(tmp, current_depth + 1, max_depth)
+                        }),
+                        Expr::RelAccess(seq) => with_str_slice(seq, |tmp| {
+                            obj.get_value_impl(tmp, current_depth + 1, max_depth)
+                        }),
                     };
                 }
                 return Some(v);
@@ -698,7 +617,10 @@ pub fn parse_str(source: &str) -> Result<Gss, Box<dyn StdError>> {
 }
 
 /// Parses a GSS string with custom parser options into a `Gss` style context.
-pub fn parse_str_with_options(source: &str, allow_redefinition: bool) -> Result<Gss, Box<dyn StdError>> {
+pub fn parse_str_with_options(
+    source: &str,
+    allow_redefinition: bool,
+) -> Result<Gss, Box<dyn StdError>> {
     let mut lex = get_lexer(
         source,
         #[cfg(feature = "interning")]
@@ -714,7 +636,10 @@ pub fn format_str(source: &str) -> Result<String, Box<dyn StdError>> {
 }
 
 /// Formats a GSS source string with custom parser options into a canonical GSS string.
-pub fn format_str_with_options(source: &str, allow_redefinition: bool) -> Result<String, Box<dyn StdError>> {
+pub fn format_str_with_options(
+    source: &str,
+    allow_redefinition: bool,
+) -> Result<String, Box<dyn StdError>> {
     let options = FormatOptions {
         allow_redefinition,
         ..Default::default()
@@ -723,7 +648,10 @@ pub fn format_str_with_options(source: &str, allow_redefinition: bool) -> Result
 }
 
 /// Formats a GSS source string with custom format options into a canonical GSS string.
-pub fn format_str_with_config(source: &str, options: &FormatOptions) -> Result<String, Box<dyn StdError>> {
+pub fn format_str_with_config(
+    source: &str,
+    options: &FormatOptions,
+) -> Result<String, Box<dyn StdError>> {
     let gss = parse_str_with_options(source, options.allow_redefinition)?;
     Ok(gss.to_gss_string_with_options(options))
 }
@@ -929,9 +857,10 @@ fn parse_gss<'lex>(mut lex: RefLexer, allow_redefinition: bool) -> Parser<Gss, B
     Parser::Success(lex, object)
 }
 
-
-
-fn parse_object<'lex>(mut lex: RefLexer, allow_redefinition: bool) -> Parser<Object, Box<dyn StdError>> {
+fn parse_object<'lex>(
+    mut lex: RefLexer,
+    allow_redefinition: bool,
+) -> Parser<Object, Box<dyn StdError>> {
     let mut object = Object::new();
     object.set_allow_redefinition(allow_redefinition);
     if lex.peek().kind == TokenKind::OpenCurly {
@@ -965,7 +894,10 @@ fn parse_object<'lex>(mut lex: RefLexer, allow_redefinition: bool) -> Parser<Obj
     Parser::Success(lex, object)
 }
 
-fn parse_list<'lex>(mut lex: RefLexer, allow_redefinition: bool) -> Parser<Vec<Value>, Box<dyn StdError>> {
+fn parse_list<'lex>(
+    mut lex: RefLexer,
+    allow_redefinition: bool,
+) -> Parser<Vec<Value>, Box<dyn StdError>> {
     try_parse!(lex, parse_open_bracket(lex));
     if lex.peek().kind == TokenKind::CloseBracket {
         lex.next();
@@ -989,13 +921,13 @@ fn parse_list<'lex>(mut lex: RefLexer, allow_redefinition: bool) -> Parser<Vec<V
     Parser::Success(lex, items)
 }
 
-
-
-
-fn parse_value<'lex>(mut lex: RefLexer, allow_redefinition: bool) -> Parser<Value, Box<dyn StdError>> {
+fn parse_value<'lex>(
+    mut lex: RefLexer,
+    allow_redefinition: bool,
+) -> Parser<Value, Box<dyn StdError>> {
     if lex.peek().kind == TokenKind::OpenBracket {
         let list = try_parse!(lex, parse_list(lex, allow_redefinition));
-        return Parser::Success(lex, new_vec(list));
+        return Parser::Success(lex, Value::Vec(list));
     }
     let t = lex.next();
     match t.kind {
@@ -1006,9 +938,12 @@ fn parse_value<'lex>(mut lex: RefLexer, allow_redefinition: bool) -> Parser<Valu
             };
             if lex.peek().kind == TokenKind::Mod {
                 lex.next();
-                return Parser::Success(lex, new_float(x as f32 / 100.));
+                return Parser::Success(lex, {
+                    let x = x as f32 / 100.;
+                    Value::Float(x)
+                });
             }
-            Parser::Success(lex, new_number(x))
+            Parser::Success(lex, Value::Number(x))
         }
         TokenKind::RealNumber => {
             let x = match t.source().parse::<f32>() {
@@ -1017,9 +952,12 @@ fn parse_value<'lex>(mut lex: RefLexer, allow_redefinition: bool) -> Parser<Valu
             };
             if lex.peek().kind == TokenKind::Mod {
                 lex.next();
-                return Parser::Success(lex, new_float(x as f32 / 100.));
+                return Parser::Success(lex, {
+                    let x = x as f32 / 100.;
+                    Value::Float(x)
+                });
             }
-            Parser::Success(lex, new_float(x))
+            Parser::Success(lex, Value::Float(x))
         }
         TokenKind::Minus => {
             let next_tok = lex.next();
@@ -1031,13 +969,16 @@ fn parse_value<'lex>(mut lex: RefLexer, allow_redefinition: bool) -> Parser<Valu
                     };
                     if lex.peek().kind == TokenKind::Mod {
                         lex.next();
-                        return Parser::Success(lex, new_float(-(mag as f32) / 100.));
+                        return Parser::Success(lex, {
+                            let x = -(mag as f32) / 100.;
+                            Value::Float(x)
+                        });
                     }
                     let val = match i32::try_from(-mag) {
                         Ok(v) => v,
                         Err(err) => return Parser::Fail(lex, err.into()),
                     };
-                    Parser::Success(lex, new_signed_number(val))
+                    Parser::Success(lex, Value::SignedNumber(val))
                 }
                 TokenKind::RealNumber => {
                     let x = match next_tok.source().parse::<f32>() {
@@ -1046,9 +987,12 @@ fn parse_value<'lex>(mut lex: RefLexer, allow_redefinition: bool) -> Parser<Valu
                     };
                     if lex.peek().kind == TokenKind::Mod {
                         lex.next();
-                        return Parser::Success(lex, new_float(x / 100.));
+                        return Parser::Success(lex, {
+                            let x = x / 100.;
+                            Value::Float(x)
+                        });
                     }
-                    Parser::Success(lex, new_float(x))
+                    Parser::Success(lex, Value::Float(x))
                 }
                 _ => Parser::Fail(lex, format!("Unexpect token `{next_tok}`").into()),
             }
@@ -1063,9 +1007,12 @@ fn parse_value<'lex>(mut lex: RefLexer, allow_redefinition: bool) -> Parser<Valu
                     };
                     if lex.peek().kind == TokenKind::Mod {
                         lex.next();
-                        return Parser::Success(lex, new_float(x as f32 / 100.));
+                        return Parser::Success(lex, {
+                            let x = x as f32 / 100.;
+                            Value::Float(x)
+                        });
                     }
-                    Parser::Success(lex, new_number(x))
+                    Parser::Success(lex, Value::Number(x))
                 }
                 TokenKind::RealNumber => {
                     let x = match next_tok.source().parse::<f32>() {
@@ -1074,23 +1021,29 @@ fn parse_value<'lex>(mut lex: RefLexer, allow_redefinition: bool) -> Parser<Valu
                     };
                     if lex.peek().kind == TokenKind::Mod {
                         lex.next();
-                        return Parser::Success(lex, new_float(x / 100.));
+                        return Parser::Success(lex, {
+                            let x = x / 100.;
+                            Value::Float(x)
+                        });
                     }
-                    Parser::Success(lex, new_float(x))
+                    Parser::Success(lex, Value::Float(x))
                 }
                 _ => Parser::Fail(lex, format!("Unexpect token `{next_tok}`").into()),
             }
         }
-        TokenKind::Identifier if t.source() == "true" => Parser::Success(lex, new_bool(true)),
-        TokenKind::Identifier if t.source() == "false" => Parser::Success(lex, new_bool(false)),
-        TokenKind::StringLiteral => Parser::Success(lex, new_string(t.unescape())),
+        TokenKind::Identifier if t.source() == "true" => Parser::Success(lex, Value::Bool(true)),
+        TokenKind::Identifier if t.source() == "false" => Parser::Success(lex, Value::Bool(false)),
+        TokenKind::StringLiteral => Parser::Success(lex, {
+            let x = t.unescape();
+            Value::String(x)
+        }),
         TokenKind::OpenCurly => {
             let object = try_parse!(lex, parse_object(lex, allow_redefinition));
-            Parser::Success(lex, new_object(object))
+            Parser::Success(lex, Value::Object(object))
         }
         TokenKind::OpenBracket => {
             let list = try_parse!(lex, parse_list(lex, allow_redefinition));
-            Parser::Success(lex, new_vec(list))
+            Parser::Success(lex, Value::Vec(list))
         }
         TokenKind::Identifier => {
             if lex.peek().kind == TokenKind::Dot {
@@ -1101,9 +1054,15 @@ fn parse_value<'lex>(mut lex: RefLexer, allow_redefinition: bool) -> Parser<Valu
                         .into_iter()
                         .map(|t| t.source().to_string()),
                 );
-                return Parser::Success(lex, new_expr(Expr::Access(seq)));
+                return Parser::Success(lex, {
+                    let x = Expr::Access(seq);
+                    Value::Expr(x)
+                });
             }
-            Parser::Success(lex, new_expr(Expr::Symbol(t.source().to_string())))
+            Parser::Success(lex, {
+                let x = Expr::Symbol(t.source().to_string());
+                Value::Expr(x)
+            })
         }
         TokenKind::Dot => {
             if lex.peek().kind == TokenKind::Identifier {
@@ -1114,7 +1073,10 @@ fn parse_value<'lex>(mut lex: RefLexer, allow_redefinition: bool) -> Parser<Valu
                         .into_iter()
                         .map(|t| t.source().to_string()),
                 );
-                return Parser::Success(lex, new_expr(Expr::RelAccess(seq)));
+                return Parser::Success(lex, {
+                    let x = Expr::RelAccess(seq);
+                    Value::Expr(x)
+                });
             }
             Parser::Fail(lex, format!("Unexpect token `{t}`").into())
         }
@@ -1486,7 +1448,10 @@ mod tests {
 
         // Booleans & Strings
         assert_eq!(gss.get_as::<bool>(&["flag"]), Some(true));
-        assert_eq!(gss.get_as::<String>(&["text"]), Some("antigravity".to_string()));
+        assert_eq!(
+            gss.get_as::<String>(&["text"]),
+            Some("antigravity".to_string())
+        );
 
         // Bounds checking
         assert_eq!(gss.get_as::<u8>(&["big_num"]), None); // 300 > u8::MAX
@@ -1522,7 +1487,8 @@ mod tests {
             }
         "#;
         assert!(parse_str(source_nested).is_err());
-        let gss_nested = parse_str_with_options(source_nested, true).expect("Should allow nested redefinition");
+        let gss_nested =
+            parse_str_with_options(source_nested, true).expect("Should allow nested redefinition");
         assert_eq!(gss_nested.get_as::<u32>(&["obj", "a"]), Some(20));
 
         // Builder & Setter
@@ -1532,7 +1498,6 @@ mod tests {
         assert!(!obj.allow_redefinition());
     }
 
-    #[cfg(feature = "value-enum")]
     #[test]
     fn test_value_enum_specifics() {
         let source = "a = 42, b = { x = 1 }, c = \"hello\"";
@@ -1582,9 +1547,9 @@ mod tests {
         // Mixed list types can be retrieved as Vec<Value>
         let mixed = gss.get_as::<Vec<Value>>(&["mixed"]).unwrap();
         assert_eq!(mixed.len(), 3);
-        assert_eq!(mixed[0].downcast_ref::<String>(), Some(&"hello".to_string()));
-        assert_eq!(mixed[1].downcast_ref::<bool>(), Some(&true));
-        assert_eq!(mixed[2].downcast_ref::<f32>(), Some(&42.5));
+        assert_eq!(mixed[0].as_string(), Some(&"hello".to_string()));
+        assert_eq!(mixed[1].as_bool(), Some(&true));
+        assert_eq!(mixed[2].as_float(), Some(&42.5));
     }
 
     #[test]
@@ -1605,7 +1570,10 @@ mod tests {
         let gss = parse_str(&formatted).expect("Formatted GSS must be valid");
         assert_eq!(gss.get_as::<u32>(&["z"]), Some(10));
         assert_eq!(gss.get_as::<bool>(&["a", "nested_a"]), Some(true));
-        assert_eq!(gss.get_as::<String>(&["a", "nested_b"]), Some("line1\nline2".to_string()));
+        assert_eq!(
+            gss.get_as::<String>(&["a", "nested_b"]),
+            Some("line1\nline2".to_string())
+        );
         assert_eq!(gss.get_as::<Vec<u32>>(&["arr"]), Some(vec![1, 2, 3]));
         assert_eq!(gss.to_string(), expected);
     }
@@ -1666,24 +1634,27 @@ mod tests {
     fn test_single_value_parsing_and_formatting() {
         // Scalar values
         let num_val = parse_value_str("42").expect("Should parse number");
-        assert_eq!(num_val.downcast_ref::<u32>(), Some(&42));
+        assert_eq!(num_val.as_number(), Some(&42));
         assert_eq!(format_value_str("42").unwrap(), "42");
 
         let str_val = parse_value_str("\"hello world\"").expect("Should parse string");
-        assert_eq!(str_val.downcast_ref::<String>(), Some(&"hello world".to_string()));
-        assert_eq!(format_value_str("\"hello world\"").unwrap(), "\"hello world\"");
+        assert_eq!(str_val.as_string(), Some(&"hello world".to_string()));
+        assert_eq!(
+            format_value_str("\"hello world\"").unwrap(),
+            "\"hello world\""
+        );
 
         let bool_val = parse_value_str("true,").expect("Should parse bool with optional comma");
-        assert_eq!(bool_val.downcast_ref::<bool>(), Some(&true));
+        assert_eq!(bool_val.as_bool(), Some(&true));
 
         // Array value
         let list_val = parse_value_str("[1, 2, 3]").expect("Should parse array");
-        assert!(list_val.downcast_ref::<Vec<Value>>().is_some());
+        assert!(list_val.as_vec().is_some());
         assert_eq!(format_value_str("[1, 2, 3]").unwrap(), "[1, 2, 3]");
 
         // Object value
         let obj_val = parse_value_str("{ a = 1 }").expect("Should parse object value");
-        assert!(obj_val.downcast_ref::<Object>().is_some());
+        assert!(obj_val.as_object().is_some());
         assert_eq!(format_value_str("{ a = 1 }").unwrap(), "{\n    a = 1,\n}");
 
         // Invalid trailing syntax check

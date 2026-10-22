@@ -61,9 +61,7 @@ fn collect_gss_files(path: &Path, out: &mut Vec<PathBuf>) -> io::Result<()> {
         return Ok(());
     }
     if path.is_dir() {
-        let mut entries: Vec<_> = fs::read_dir(path)?
-            .filter_map(|e| e.ok())
-            .collect();
+        let mut entries: Vec<_> = fs::read_dir(path)?.filter_map(|e| e.ok()).collect();
         entries.sort_by_key(|e| e.file_name());
 
         for entry in entries {
@@ -162,7 +160,9 @@ pub fn run() {
                     "never" => color_choice = ColorChoice::Never,
                     "auto" => color_choice = ColorChoice::Auto,
                     other => {
-                        eprintln!("Error: invalid --color value `{other}`, expected: auto, always, never");
+                        eprintln!(
+                            "Error: invalid --color value `{other}`, expected: auto, always, never"
+                        );
                         process::exit(1);
                     }
                 }
@@ -210,7 +210,8 @@ pub fn run() {
                     if is_unformatted {
                         unformatted_files.push("<stdin>".to_string());
                         if show_diff {
-                            let diff = unified_diff(&buffer, &formatted, "a/<stdin>", "b/<stdin>", color);
+                            let diff =
+                                unified_diff(&buffer, &formatted, "a/<stdin>", "b/<stdin>", color);
                             write_stdout(&diff);
                         }
                     }
